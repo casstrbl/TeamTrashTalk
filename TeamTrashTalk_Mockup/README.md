@@ -19,10 +19,6 @@ This starts a local dev server. Open the printed URL in your browser to view the
 ```
 pnpm build
 ```
-
-Outputs a static production build to `dist/`, which can be deployed to any static
-host (Netlify, Vercel, GitHub Pages, etc.).
-
 ## Project structure
 
 - `src/App.tsx` — main dashboard component (bin cards, alerts panel, admin table)
@@ -39,6 +35,6 @@ host (Netlify, Vercel, GitHub Pages, etc.).
 
 ## Notes
 
-This is currently mock data for the design mockup stage — bin readings, alerts, and
+This is currently mock data for the design mockup stage bin readings, alerts, and
 staff list are hardcoded in `App.tsx` and will be replaced with real sensor data
 once the backend is connected.
