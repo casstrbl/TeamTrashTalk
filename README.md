@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Waste Monitoring System is a Java application designed to monitor waste levels across a university campus.
+The Trash Talk Waste Monitoring System is a Java application designed to monitor waste levels across a university campus.
 
 The system uses sensors to collect information about the fill levels of waste bins. Each waste station can contain three waste categories:
 
@@ -198,7 +198,7 @@ The system is intended to eventually support waste monitoring across an entire u
 ### Running the Project
 
 1. Open Eclipse.
-2. Import or create the `WasteMonitoringSystem` Java project.
+2. Import or create the `TrashTalk` Java project.
 3. Make sure the project uses the appropriate JDK.
 4. Locate `Application.java`.
 5. Right-click `Application.java`.
