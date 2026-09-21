@@ -1,5 +1,6 @@
 import { useState, useMemo, Fragment } from 'react'
 import logoUrl from './imports/logo.png'
+import { mockBins } from './data/mockBins'
 
 // fill bands: green 0-49, yellow 50-79, red 80-100
 const WARN_AT = 50
@@ -18,6 +19,8 @@ type Zone =
   | 'Lassen Hall'
   | 'Douglass Hall'
   | 'Mendocino Hall'
+    | 'Zone A'
+    | 'Zone B'
 type Stream = 'Landfill' | 'Recycling' | 'Compost'
 
 interface Compartment {
@@ -59,7 +62,7 @@ interface StaffMember {
 // data
 
 // real bins from the client spreadsheet, fills are landfill/recycling/compost
-const TRIBINS: Tribin[] = [
+const ORIGINAL_TRIBINS: Tribin[] = [
   {
     id: 'TB-026', name: 'Bin 26', zone: 'Main Quad', location: 'Main quad',
     lat: 38.56324, lng: -121.42557,
@@ -123,7 +126,7 @@ const ALL_ZONES: Zone[] = [
   'Main Quad', 'Sacramento Hall', 'Welcome Center', 'Shasta Hall',
   'Yosemite Hall', 'Lassen Hall', 'Douglass Hall', 'Mendocino Hall',
 ]
-
+const TRIBINS: Tribin[] = mockBins as Tribin[]
 // helpers
 
 function maxFill(bin: Tribin) {
