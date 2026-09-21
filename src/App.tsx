@@ -1,5 +1,6 @@
 import { useState, useMemo, Fragment } from 'react'
 import logoUrl from './imports/logo.png'
+import { mockBins } from './data/mockBins'
 
 // fill bands: green 0-49, yellow 50-79, red 80-100
 const WARN_AT = 50
@@ -18,6 +19,8 @@ type Zone =
   | 'Lassen Hall'
   | 'Douglass Hall'
   | 'Mendocino Hall'
+    | 'Zone A'
+    | 'Zone B'
 type Stream = 'Landfill' | 'Recycling' | 'Compost'
 
 interface Compartment {
@@ -59,7 +62,7 @@ interface StaffMember {
 // data
 
 // real bins from the client spreadsheet, fills are landfill/recycling/compost
-const TRIBINS: Tribin[] = [
+const ORIGINAL_TRIBINS: Tribin[] = [
   {
     id: 'TB-026', name: 'Bin 26', zone: 'Main Quad', location: 'Main quad',
     lat: 38.56324, lng: -121.42557,
@@ -111,19 +114,19 @@ const TRIBINS: Tribin[] = [
 ]
 
 const STAFF: StaffMember[] = [
-  { id: 's1', name: 'Person 1', role: 'editor', zones: ['Main Quad', 'Sacramento Hall', 'Welcome Center', 'Shasta Hall', 'Yosemite Hall', 'Lassen Hall', 'Douglass Hall', 'Mendocino Hall'], email: 'person1@csus.edu' },
-  { id: 's2', name: 'Person 2', role: 'viewer', zones: ['Sacramento Hall', 'Douglass Hall'], email: 'person2@csus.edu' },
-  { id: 's3', name: 'Person 3', role: 'viewer', zones: ['Lassen Hall', 'Main Quad'], email: 'person3@csus.edu' },
-  { id: 's4', name: 'Person 4', role: 'viewer', zones: ['Welcome Center', 'Yosemite Hall', 'Mendocino Hall'], email: 'person4@csus.edu' },
-  { id: 's5', name: 'Person 5', role: 'viewer', zones: ['Shasta Hall'], email: 'person5@csus.edu' },
+  { id: 's1', name: 'Person 1', role: 'editor', zones: ['Zone A', 'Zone B'], email: 'person1@csus.edu' },
+  { id: 's2', name: 'Person 2', role: 'viewer', zones: ['Zone A'], email: 'person2@csus.edu' },
+  { id: 's3', name: 'Person 3', role: 'viewer', zones: ['Zone A'], email: 'person3@csus.edu' },
+  { id: 's4', name: 'Person 4', role: 'viewer', zones: ['Zone B'], email: 'person4@csus.edu' },
+  { id: 's5', name: 'Person 5', role: 'viewer', zones: ['Zone B'], email: 'person5@csus.edu' },
 ]
 
 // one zone per building, so staff can filter by location
-const ALL_ZONES: Zone[] = [
-  'Main Quad', 'Sacramento Hall', 'Welcome Center', 'Shasta Hall',
-  'Yosemite Hall', 'Lassen Hall', 'Douglass Hall', 'Mendocino Hall',
-]
+const TRIBINS: Tribin[] = mockBins as Tribin[]
 
+const ALL_ZONES: Zone[] = [
+    ...new Set(TRIBINS.map(bin => bin.zone))
+]
 // helpers
 
 function maxFill(bin: Tribin) {
