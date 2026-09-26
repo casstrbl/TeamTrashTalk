@@ -16,9 +16,11 @@ public class Bin {
 												entire tribin structure, not just the actual trash bin itself. The current value for BIN_HEIGHT is 
 												temporary until we get a measurement of the stand-alone bin for accurate sensor readings.*/
 	// Bin information
-	private  int binID;
-	private  String location;
-	private	BinType wasteStream;
+	private int binID;
+	private String binLocation;
+	private double binCoordinatesX;
+	private double binCoordinatesY;
+	private	BinType binType;
 	
 	// Waste level information
 	private double wasteHeight;
@@ -29,13 +31,13 @@ public class Bin {
 	 * Creates a new Bin.
 	 * 
 	 * @param binID the unique ID of the bin
-	 * @param location the physical location of the bin
-	 * @param wasteStream the type of waste collected by the bin
+	 * @param binLocation the physical location of the bin
+	 * @param binType the type of waste collected by the bin
 	 */	
-	public Bin(int binID, String location, BinType wasteStream){ // Instance of Bin
+	public Bin(int binID, String binLocation, BinType binType){
 		this.binID = binID;
-		this.location = location;
-		this.wasteStream = wasteStream;
+		this.binLocation = binLocation;
+		this.binType = binType;
 		
 		// Initial values
 		this.wasteHeight = 0;
@@ -50,16 +52,56 @@ public class Bin {
 	}
 	
 	
+	/**
+	 * Retrieves the bin ID number
+	 */
+	public int getBinID() {
+		return binID;
+	}
 	
-	/*public void setWasteHeight() {	// Will flesh this method out later 
-		this.wasteHeight = wasteHeight;
-	}*/
+	
+	/**
+	 * Retrieves the bin location
+	 */
+	public String getBinLocation( ){
+		return binLocation;
+	}
+	
+	
+	/**
+	 * Retrieves the GPS coordinates of the bin
+	 */
+	public double getBinCoordinatesX() {
+		return binCoordinatesX;
+	}
+	
+	
+	public double getBinCoordinatesY() {
+		return binCoordinatesY;
+	}
+	
+	
+	/**
+	 * Retrieves the bin's waste stream
+	 */
+	public BinType getBinType() {
+		return binType;
+	}
+	
+	
+	/**
+	 * Sets the waste height according to the sensor reading
+	 */
+	public void setWasteHeight(SensorReading sensorReading) {
+		this.wasteHeight = sensorReading.getValue();
+		
+	}
 	
 	
 	/**
 	 * Represents the different types of waste streams.
 	 */
-	public enum BinType{ // Declare the bin types/waste streams
+	public enum BinType{
 		LANDFILL,
 		RECYCLING,
 		COMPOST
@@ -69,7 +111,7 @@ public class Bin {
 	/**
 	 * Represents the current status of the bin.
 	 */
-	public enum BinStatus{ // Declare the bin status UI colors
+	public enum BinStatus{
 		GREEN, 		// "OK"
 		YELLOW,		// "Warning"
 		RED			// "Critical"
