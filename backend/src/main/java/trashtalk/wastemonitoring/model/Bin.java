@@ -40,20 +40,33 @@ public class Bin {
 		// Initial values
 		this.wasteHeight = 0;
 	}
-	
-	
+
+	public int getBinID() {
+		return binID;
+	}
+
+	public String getLocation() {
+		return location;
+	}
+
+	public BinType getWasteStream() {
+		return wasteStream;
+	}
+
 	/**
 	 * Retrieves the current waste level.
 	 */
 	public double getWasteHeight() {
 		return wasteHeight;
 	}
-	
-	
-	
-	/*public void setWasteHeight() {	// Will flesh this method out later 
+
+	/**
+	 * Updates the current waste height.
+	 * This will later be called after sensor readings are processed.
+	 */
+	public void setWasteHeight(double wasteHeight) {
 		this.wasteHeight = wasteHeight;
-	}*/
+	}
 	
 	
 	/**
