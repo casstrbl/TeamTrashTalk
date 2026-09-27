@@ -895,6 +895,7 @@ const ICONS = {
   settings: <><path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z" /><path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" /></>,
   bell: <><path d="M10 5a2 2 0 1 1 4 0a7 7 0 0 1 4 6v3a4 4 0 0 0 2 3h-16a4 4 0 0 0 2 -3v-3a7 7 0 0 1 4 -6" /><path d="M9 17v1a3 3 0 0 0 6 0v-1" /></>,
   mapPin: <><path d="M9 11a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" /><path d="M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 11.314 0z" /></>,
+  layoutGrid: <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></>,
   arrowRight: <><path d="M5 12l14 0" /><path d="M13 18l6 -6" /><path d="M13 6l6 6" /></>,
   arrowLeft: <><path d="M5 12l14 0" /><path d="M5 12l6 6" /><path d="M5 12l6 -6" /></>,
 }
@@ -909,6 +910,7 @@ function Icon({ name, size = 20 }: { name: keyof typeof ICONS; size?: number }) 
 
 const NAV_ITEMS: { page: Page; label: string; icon: keyof typeof ICONS; editorsOnly?: boolean }[] = [
   { page: 'summary', label: 'Summary', icon: 'home' },
+  { page: 'details', label: 'Details', icon: 'layoutGrid' },
   { page: 'pickup', label: 'Pickup List', icon: 'listCheck' },
   { page: 'history', label: 'History', icon: 'chartLine' },
   { page: 'admin', label: 'Admin', icon: 'settings', editorsOnly: true },
@@ -918,15 +920,14 @@ const NAV_ITEMS: { page: Page; label: string; icon: keyof typeof ICONS; editorsO
 // buttons are 48px, a little over apple's 44px minimum
 function NavRail({ page, role, onNavigate }: { page: Page; role: Role; onNavigate: (page: Page) => void }) {
   const items = NAV_ITEMS.filter(i => !i.editorsOnly || role === 'editor')
-  const current = page === 'details' ? 'summary' : page // details is opened from summary
   const button = (i: (typeof NAV_ITEMS)[number]) => (
     <button
       key={i.page}
       onClick={() => onNavigate(i.page)}
       aria-label={i.label}
       title={i.label}
-      aria-current={current === i.page ? 'page' : undefined}
-      className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${current === i.page ? 'bg-ivory text-pine' : 'text-mist hover:text-ivory hover:bg-ivory/10'}`}
+      aria-current={page === i.page ? 'page' : undefined}
+      className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${page === i.page ? 'bg-ivory text-pine' : 'text-mist hover:text-ivory hover:bg-ivory/10'}`}
     >
       <Icon name={i.icon} size={22} />
     </button>
@@ -968,7 +969,7 @@ function TopBar({ userName, role, greeting, syncedLabel, alertCount, onSwitchUse
           {userName.split(' ').map(n => n[0]).join('')}
         </span>
         <span className="leading-tight">
-          <span className="block text-xs text-pine-muted">{greeting}</span>
+          <span className="block text-xs text-pine-muted">{greeting},</span>
           <span className="block text-sm font-semibold text-pine">
             {userName} <span className="font-medium text-pine-muted capitalize">· {role}</span>
           </span>
@@ -1043,7 +1044,7 @@ const SKETCH = (() => {
 })()
 
 function CampusSketch({ bins }: { bins: Tribin[] }) {
-  const zones = ALL_ZONES.map(zone => {
+  const zones = [...new Set(bins.map(b => b.zone))].map(zone => {
     const zb = bins.filter(b => b.zone === zone).map(b => SKETCH.project(b.lng, b.lat))
     return { zone, x: zb.reduce((s, p) => s + p[0], 0) / zb.length, y: Math.min(...zb.map(p => p[1])) }
   })
@@ -1078,9 +1079,10 @@ function alertLine(a: Alert) {
 }
 
 function SummaryPage({
-  needPickup, syncedLabel, hero, statusCounts, campusAvg, onlineCount, zones, topAlerts, alertCount,
+  bins, needPickup, syncedLabel, hero, statusCounts, campusAvg, onlineCount, zones, topAlerts, alertCount,
   onShowOnMap, onOpenDetail, onStatus, onZone, onOpenMap, onAlert, onViewAllAlerts,
 }: {
+  bins: Tribin[] // the signed-in user's bins
   needPickup: number
   syncedLabel: string
   hero: Tribin | undefined
@@ -1181,7 +1183,7 @@ function SummaryPage({
           {/* the sketch fills whatever height the grid gives this tile rather than setting it,
               so its tall campus shape can't stretch the rows */}
           <button onClick={onOpenMap} aria-label="Open map" className="relative flex-1 min-h-[140px] rounded-2xl bg-ivory overflow-hidden">
-            <span className="absolute inset-2"><CampusSketch bins={TRIBINS} /></span>
+            <span className="absolute inset-2"><CampusSketch bins={bins} /></span>
           </button>
         </div>
 
@@ -1248,6 +1250,19 @@ function ComingSoon({ title, icon, text }: { title: string; icon: keyof typeof I
   )
 }
 
+// a viewer with no zones assigned sees this instead of bins
+function NoZonesNotice() {
+  return (
+    <div className={`${TILE} bg-white py-16 text-center`}>
+      <span className="mx-auto mb-4 w-14 h-14 rounded-full bg-teal-soft text-teal flex items-center justify-center">
+        <Icon name="mapPin" size={26} />
+      </span>
+      <p className="text-lg font-semibold text-pine">No zones assigned yet</p>
+      <p className="text-sm text-pine-muted mt-1 max-w-sm mx-auto">Ask an admin to add you to a zone. Its bins and alerts will show up here.</p>
+    </div>
+  )
+}
+
 // "2 min ago" / "3 hours ago" -> minutes
 function minutesAgo(label: string) {
   const m = label.match(/(\d+)\s*(min|hour)/)
@@ -1257,7 +1272,8 @@ function minutesAgo(label: string) {
 // main app
 
 export default function App() {
-  const [currentRole, setCurrentRole] = useState<Role>('editor')
+  // demo sign-in: the avatar switches between person 1 and person 2
+  const [currentUserId, setCurrentUserId] = useState('s1')
   const [filterZone, setFilterZone] = useState<Zone | 'All'>('All')
   const [sortBy, setSortBy] = useState<'fill' | 'zone' | 'status' | 'name'>('fill')
   const [filterStatus, setFilterStatus] = useState<Status | 'All'>('All')
@@ -1267,6 +1283,17 @@ export default function App() {
   const [page, setPage] = useState<Page>('summary')
   const [editingStaff, setEditingStaff] = useState<string | null>(null)
   const [staffList, setStaffList] = useState<StaffMember[]>(STAFF)
+
+  // role and zones come from the staff list, so changes in admin apply right away.
+  // editors see every bin; viewers only bins in the zones an admin assigned them.
+  // display filtering only: real access control has to live in the backend
+  const currentUser = staffList.find(s => s.id === currentUserId) ?? staffList[0]
+  const currentRole = currentUser.role
+  const visibleZones = currentRole === 'editor' ? ALL_ZONES : ALL_ZONES.filter(z => currentUser.zones.includes(z))
+  const zonesKey = visibleZones.join()
+  const myBins = useMemo(() => TRIBINS.filter(b => visibleZones.includes(b.zone)), [zonesKey])
+  const noZones = myBins.length === 0
+
   const [viewMode, setViewMode] = useState<'cards' | 'map'>('cards')
   // bin whose card is open on the map, highlighted in cards view until the card is closed
   const [mapBinId, setMapBinId] = useState<string | null>(null)
@@ -1277,6 +1304,13 @@ export default function App() {
 
   // each page starts at the top (runs before the scroll request below, which may move it)
   useEffect(() => { window.scrollTo(0, 0) }, [page])
+
+  // a filter or open card from before a user/zone change may point outside the new zones
+  useEffect(() => {
+    setFilterZone('All')
+    setMapBinId(null)
+    setSelectedBin(null)
+  }, [currentUserId, zonesKey])
 
   // scroll after render, and only when the target isn't fully on screen. in map view the target
   // is the map itself, so a jumped-to pin (aimed low in the map) clears the floating tab bar
@@ -1297,7 +1331,7 @@ export default function App() {
   // alerts rebuild when the threshold changes
   const alerts = useMemo<Alert[]>(() => {
     const out: Alert[] = []
-    for (const bin of TRIBINS) {
+    for (const bin of myBins) {
       if (bin.sensorStatus === 'offline') {
         out.push({
           id: `${bin.id}-offline`, binId: bin.id, binName: bin.name, zone: bin.zone,
@@ -1326,27 +1360,27 @@ export default function App() {
       }
     }
     return out
-  }, [alertThreshold])
+  }, [alertThreshold, myBins])
 
   const visibleAlerts = alerts.filter(a => !dismissedIds.includes(a.id))
   const unreadCount = visibleAlerts.length
 
   // summary numbers. offline sensors report stale fills, so they're left out of fill-based ones
-  const onlineBins = TRIBINS.filter(b => b.sensorStatus === 'online')
+  const onlineBins = myBins.filter(b => b.sensorStatus === 'online')
   const needPickup = onlineBins.filter(b => maxFill(b) >= alertThreshold).length
   const heroBin = [...onlineBins].sort((a, b) => maxFill(b) - maxFill(a))[0]
   const statusCounts = { critical: 0, warn: 0, ok: 0, offline: 0 }
-  for (const b of TRIBINS) statusCounts[binStatus(b)]++
+  for (const b of myBins) statusCounts[binStatus(b)]++
   const campusAvg = onlineBins.length ? Math.round(onlineBins.reduce((s, b) => s + avgFill(b), 0) / onlineBins.length) : 0
-  const zoneCounts = ALL_ZONES.map(zone => {
-    const zb = TRIBINS.filter(b => b.zone === zone)
+  const zoneCounts = visibleZones.map(zone => {
+    const zb = myBins.filter(b => b.zone === zone)
     return { zone, critical: zb.filter(b => binStatus(b) === 'critical').length, total: zb.length }
   })
   const syncedMin = Math.min(...onlineBins.map(b => minutesAgo(b.lastUpdated)))
   const syncedLabel = !Number.isFinite(syncedMin) ? 'Not synced' : syncedMin < 60 ? `Synced ${syncedMin} min ago` : `Synced ${Math.floor(syncedMin / 60)} hr ago`
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
-  const userName = currentRole === 'editor' ? 'Person 1' : 'Person 2'
+  const userName = currentUser.name
 
   // top alerts tile: each bin's most urgent alert, full-critical first, then offline, then the rest
   const alertRank = (a: Alert) => (a.kind === 'fill' ? ((a.value ?? 0) >= CRITICAL_AT ? 0 : 2) : a.kind === 'offline' ? 1 : 3)
@@ -1360,7 +1394,7 @@ export default function App() {
     .slice(0, 3)
 
   const filteredBins = useMemo(() => {
-    let bins = [...TRIBINS]
+    let bins = [...myBins]
     if (filterZone !== 'All') bins = bins.filter(b => b.zone === filterZone)
     if (filterStatus !== 'All') bins = bins.filter(b => binStatus(b) === filterStatus)
     bins.sort((a, b) => {
@@ -1374,9 +1408,9 @@ export default function App() {
       return 0
     })
     return bins
-  }, [filterZone, filterStatus, sortBy])
+  }, [myBins, filterZone, filterStatus, sortBy])
 
-  const mapBin = TRIBINS.find(b => b.id === mapBinId) ?? null
+  const mapBin = myBins.find(b => b.id === mapBinId) ?? null
 
   // the picked bin keeps its pin even when the filters hide it
   const mapBins = useMemo(
@@ -1456,12 +1490,14 @@ export default function App() {
           greeting={greeting}
           syncedLabel={syncedLabel}
           alertCount={unreadCount}
-          onSwitchUser={() => setCurrentRole(r => (r === 'editor' ? 'viewer' : 'editor'))}
+          onSwitchUser={() => setCurrentUserId(id => (id === 's1' ? 's2' : 's1'))}
           onBell={openAlerts}
         />
 
-        {page === 'summary' && (
+        {page === 'summary' && noZones && <NoZonesNotice />}
+        {page === 'summary' && !noZones && (
           <SummaryPage
+            bins={myBins}
             needPickup={needPickup}
             syncedLabel={syncedLabel}
             hero={heroBin}
@@ -1498,6 +1534,7 @@ export default function App() {
               <h1 className="text-3xl lg:text-4xl font-semibold text-pine">Details</h1>
             </div>
             {/* content: bins + sidebar */}
+            {noZones ? <NoZonesNotice /> : (
             <div className="flex flex-col lg:flex-row gap-6">
 
               {/* left: bins grid */}
@@ -1518,7 +1555,7 @@ export default function App() {
                     <select value={filterZone} onChange={e => setFilterZone(e.target.value as any)}
                       className="bg-transparent font-medium text-forest outline-none cursor-pointer pr-1">
                       <option value="All">All</option>
-                      {ALL_ZONES.map(z => <option key={z} value={z}>{z}</option>)}
+                      {visibleZones.map(z => <option key={z} value={z}>{z}</option>)}
                     </select>
                   </div>
 
@@ -1628,10 +1665,10 @@ export default function App() {
                   <p className="text-[11px] uppercase tracking-widest text-stone-400 font-semibold mb-3">Landfill Activity</p>
                   <div className="grid grid-cols-2 gap-3">
                     {[
-                      { label: 'Total Bins', value: TRIBINS.length, color: 'text-forest' },
-                      { label: 'Critical', value: TRIBINS.filter(b => binStatus(b) === 'critical').length, color: 'text-status-critical-ink' },
-                      { label: 'Warning', value: TRIBINS.filter(b => binStatus(b) === 'warn').length, color: 'text-status-warn-ink' },
-                      { label: 'Offline', value: TRIBINS.filter(b => b.sensorStatus === 'offline').length, color: 'text-status-offline-ink' },
+                      { label: 'Total Bins', value: myBins.length, color: 'text-forest' },
+                      { label: 'Critical', value: myBins.filter(b => binStatus(b) === 'critical').length, color: 'text-status-critical-ink' },
+                      { label: 'Warning', value: myBins.filter(b => binStatus(b) === 'warn').length, color: 'text-status-warn-ink' },
+                      { label: 'Offline', value: myBins.filter(b => b.sensorStatus === 'offline').length, color: 'text-status-offline-ink' },
                     ].map(s => (
                       <div key={s.label} className="text-center py-2 bg-sage rounded-xl">
                         <p className={`font-mono font-bold text-xl ${s.color}`}>{s.value}</p>
@@ -1643,16 +1680,17 @@ export default function App() {
                     <div className="flex justify-between text-xs mb-1.5">
                       <span className="text-stone-400">Landfill activity</span>
                       <span className="font-mono font-semibold text-forest">
-                        {Math.round(TRIBINS.reduce((s, b) => s + avgFill(b), 0) / TRIBINS.length)}%
+                        {Math.round(myBins.reduce((s, b) => s + avgFill(b), 0) / Math.max(1, myBins.length))}%
                       </span>
                     </div>
                     <div className="h-2 bg-stone-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-olive rounded-full" style={{ width: `${Math.round(TRIBINS.reduce((s, b) => s + avgFill(b), 0) / TRIBINS.length)}%` }} />
+                      <div className="h-full bg-olive rounded-full" style={{ width: `${Math.round(myBins.reduce((s, b) => s + avgFill(b), 0) / Math.max(1, myBins.length))}%` }} />
                     </div>
                   </div>
                 </div>
               </aside>
             </div>
+            )}
           </>
         )}
 
