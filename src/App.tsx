@@ -4,6 +4,8 @@ import { divIcon, latLngBounds } from 'leaflet'
 import type { LatLngBounds, LatLngTuple, Layer, Point } from 'leaflet'
 import { MapContainer, TileLayer, ImageOverlay, Pane, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
+import Lenis from 'lenis'
+import 'lenis/dist/lenis.css'
 import logoUrl from './imports/logo.png'
 import { mockBins } from './data/mockBins'
 import { campusBoundary } from './data/campusBoundary'
@@ -882,7 +884,7 @@ function BinMap(props: BinMapProps) {
 
   return (
     // isolate keeps leaflet's z-indexes (up to 1000) below the sticky nav and the detail popup
-    <div data-map className="relative isolate h-[60vh] min-h-[320px] max-h-[640px] bg-white rounded-2xl border border-stone-200/80 overflow-hidden scroll-mt-4">
+    <div data-map data-lenis-prevent className="relative isolate h-[60vh] min-h-[320px] max-h-[640px] bg-white rounded-2xl border border-stone-200/80 overflow-hidden scroll-mt-4">
       <MapContainer {...initial} maxZoom={MAX_ZOOM} maxBounds={MAP_LIMIT} maxBoundsViscosity={1} className="h-full w-full">
         <BaseMap />
         <CampusFog />
@@ -1342,8 +1344,30 @@ export default function App() {
   const binsRef = useRef<HTMLDivElement>(null)
   const alertsRef = useRef<HTMLDivElement>(null)
 
-  // each page starts at the top (runs before the scroll request below, which may move it)
-  useEffect(() => { window.scrollTo(0, 0) }, [page])
+  // eased, gliding wheel/trackpad scrolling (like framer's smooth scroll). touch keeps the device's
+  // own scrolling, and lenis turns smoothing off when "reduce motion" is set. the map and the
+  // alerts list opt out with data-lenis-prevent so they keep their own wheel behavior
+  const lenisRef = useRef<Lenis | null>(null)
+  useEffect(() => {
+    const lenis = new Lenis({ autoRaf: true, lerp: 0.1, smoothWheel: true, syncTouch: false })
+    lenisRef.current = lenis
+    return () => {
+      lenis.destroy()
+      lenisRef.current = null
+    }
+  }, [])
+
+  // each page starts at the top, straight away since its content is new (runs before the
+  // scroll request below, which may then glide it)
+  useEffect(() => {
+    const lenis = lenisRef.current
+    if (lenis) {
+      lenis.resize() // the new page's height, or later scrolls get clamped to the old one
+      lenis.scrollTo(0, { immediate: true, force: true })
+    } else {
+      window.scrollTo(0, 0)
+    }
+  }, [page])
 
   // a filter or open card from before a user/zone change may point outside the new zones
   useEffect(() => {
@@ -1361,7 +1385,10 @@ export default function App() {
     if (!el) return
     const { top, bottom } = el.getBoundingClientRect()
     const visibleBottom = window.innerHeight - (window.innerWidth < 1024 ? 96 : 0) // tab bar
-    if (top < 8 || bottom > visibleBottom) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    if (top >= 8 && bottom <= visibleBottom) return
+    const lenis = lenisRef.current
+    if (lenis) lenis.scrollTo(el, { force: true }) // lenis honors the target's scroll-mt-4 gap
+    else el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [scrollReq])
 
   function requestScroll(target: 'bins' | 'alerts') {
@@ -1541,313 +1568,316 @@ export default function App() {
           onBell={openAlerts}
         />
 
-        {page === 'summary' && noZones && <NoZonesNotice />}
-        {page === 'summary' && !noZones && (
-          <SummaryPage
-            bins={myBins}
-            needPickup={needPickup}
-            syncedLabel={syncedLabel}
-            hero={heroBin}
-            statusCounts={statusCounts}
-            campusAvg={campusAvg}
-            onlineCount={onlineBins.length}
-            zones={zoneCounts}
-            topAlerts={topAlerts}
-            alertCount={unreadCount}
-            onShowOnMap={showOnMapFromSummary}
-            onOpenDetail={setSelectedBin}
-            onStatus={status => openDetails({ status })}
-            onZone={zone => openDetails({ zone })}
-            onPickup={openPickupBins}
-            onOpenMap={openMap}
-            onAlert={showOnMapFromSummary}
-            onViewAllAlerts={openAlerts}
-          />
-        )}
+        {/* keyed by page so the content fades in on every switch; the header and nav stay put */}
+        <div key={page} className="animate-page-in motion-reduce:animate-none space-y-5 lg:space-y-6">
+          {page === 'summary' && noZones && <NoZonesNotice />}
+          {page === 'summary' && !noZones && (
+            <SummaryPage
+              bins={myBins}
+              needPickup={needPickup}
+              syncedLabel={syncedLabel}
+              hero={heroBin}
+              statusCounts={statusCounts}
+              campusAvg={campusAvg}
+              onlineCount={onlineBins.length}
+              zones={zoneCounts}
+              topAlerts={topAlerts}
+              alertCount={unreadCount}
+              onShowOnMap={showOnMapFromSummary}
+              onOpenDetail={setSelectedBin}
+              onStatus={status => openDetails({ status })}
+              onZone={zone => openDetails({ zone })}
+              onPickup={openPickupBins}
+              onOpenMap={openMap}
+              onAlert={showOnMapFromSummary}
+              onViewAllAlerts={openAlerts}
+            />
+          )}
 
-        {page === 'pickup' && <ComingSoon title="Pickup List" icon="listCheck" text="The bins to empty next, in pickup order, will live here." />}
-        {page === 'history' && <ComingSoon title="History" icon="chartLine" text="Past fill levels and pickups for each bin will live here." />}
+          {page === 'pickup' && <ComingSoon title="Pickup List" icon="listCheck" text="The bins to empty next, in pickup order, will live here." />}
+          {page === 'history' && <ComingSoon title="History" icon="chartLine" text="Past fill levels and pickups for each bin will live here." />}
 
-        {page === 'details' && (
-          <>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setPage('summary')}
-                aria-label="Back to Summary"
-                className="inline-flex items-center gap-1.5 bg-white text-pine text-sm font-semibold pl-3 pr-4 min-h-11 rounded-full hover:bg-white/70 transition-colors"
-              >
-                <Icon name="arrowLeft" size={18} />
-                Summary
-              </button>
-              <h1 className="text-3xl lg:text-4xl font-semibold text-pine">Details</h1>
-            </div>
-            {/* content: bins + sidebar */}
-            {noZones ? <NoZonesNotice /> : (
-            <div className="flex flex-col lg:flex-row gap-6">
-
-              {/* left: bins grid */}
-              <div ref={binsRef} className="flex-1 min-w-0 space-y-4 scroll-mt-4">
-                {/* filters */}
-                <div className="flex flex-wrap gap-2 items-center">
-                  <div className="flex items-center bg-white rounded-xl border border-stone-200 p-0.5 text-xs" role="group" aria-label="View">
-                    {(['cards', 'map'] as const).map(mode => (
-                      <button key={mode} onClick={() => { setViewMode(mode); setMapFocus(null) }} aria-pressed={viewMode === mode}
-                        className={`px-3 py-1.5 rounded-[10px] font-medium transition-colors ${viewMode === mode ? 'bg-teal text-ivory' :'text-stone-400 hover:text-stone-600'}`}
-                      >{mode === 'cards' ? 'Cards' : 'Map'}</button>
-                    ))}
-                  </div>
-
-                  <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-                    <span className="text-stone-400 font-medium mr-1">Zone:</span>
-                    <select value={filterZone} onChange={e => setFilterZone(e.target.value as any)}
-                      className="bg-transparent font-medium text-forest outline-none cursor-pointer pr-1">
-                      <option value="All">All</option>
-                      {visibleZones.map(z => <option key={z} value={z}>{z}</option>)}
-                    </select>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
-                    <span className="text-stone-400 font-medium mr-1">Status:</span>
-                    <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as any)}
-                      className="bg-transparent font-medium text-forest outline-none cursor-pointer pr-1">
-                      <option value="All">All</option>
-                      <option value="critical">Critical</option>
-                      <option value="warn">Warning</option>
-                      <option value="ok">OK</option>
-                      <option value="offline">Offline</option>
-                    </select>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
-                    <span className="text-stone-400 font-medium mr-1">Sort:</span>
-                    <select value={sortBy} onChange={e => setSortBy(e.target.value as any)}
-                      className="bg-transparent font-medium text-forest outline-none cursor-pointer pr-1">
-                      <option value="fill">Fill % (high→low)</option>
-                      <option value="status">Status</option>
-                      <option value="zone">Zone</option>
-                      <option value="name">Name</option>
-                    </select>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
-                    <span className="text-stone-400 font-medium">Alert at</span>
-                    {/* -/+ look the same in every browser (ipad safari has no number arrows); before: pads the tap area */}
-                    <button
-                      onClick={() => setAlertThreshold(t => Math.max(10, t - 5))}
-                      disabled={alertThreshold <= 10}
-                      aria-label="Lower alert threshold"
-                      className="relative w-4 h-4 flex items-center justify-center font-semibold text-stone-400 hover:text-forest disabled:text-stone-200 transition-colors before:absolute before:-inset-x-1.5 before:-inset-y-3.5"
-                    >−</button>
-                    <input
-                      type="number" min={10} max={100} step={5} value={alertThreshold}
-                      onChange={e => setAlertThreshold(Math.min(100, Math.max(10, Number(e.target.value) || 0)))}
-                      aria-label="Alert threshold"
-                      className="w-7 text-center bg-transparent font-medium text-forest outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                    />
-                    <span className="text-stone-400 font-medium">%</span>
-                    <button
-                      onClick={() => setAlertThreshold(t => Math.min(100, t + 5))}
-                      disabled={alertThreshold >= 100}
-                      aria-label="Raise alert threshold"
-                      className="relative w-4 h-4 flex items-center justify-center font-semibold text-stone-400 hover:text-forest disabled:text-stone-200 transition-colors before:absolute before:-inset-x-1.5 before:-inset-y-3.5"
-                    >+</button>
-                  </div>
-
-                  <span className="ml-auto text-xs text-stone-400 font-mono">{filteredBins.length} bin{filteredBins.length !== 1 ? 's' : ''}</span>
-                </div>
-
-                {/* grid or map */}
-                {shownCount === 0 ? (
-                  <div className="py-16 text-center text-stone-400">
-                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-2"><path d="M4 7h16M9 7V4h6v3M10 11v6M14 11v6M6 7l1 13h10l1-13"/></svg>
-                    <p className="text-sm">No bins match these filters.</p>
-                  </div>
-                ) : viewMode === 'map' ? (
-                  <BinMap
-                    bins={mapBins}
-                    fitKey={filteredBins.map(b => b.id).join()}
-                    selectedId={mapBinId}
-                    focus={mapFocus}
-                    onSelect={setMapBinId}
-                    onClosePopup={() => setMapBinId(null)}
-                    onOpenDetail={setSelectedBin}
-                  />
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                    {filteredBins.map(bin => (
-                      <BinCard key={bin.id} bin={bin} onClick={() => setSelectedBin(bin)} onShowOnMap={() => showOnMap(bin.id)} highlighted={bin.id === mapBinId} />
-                    ))}
-                  </div>
-                )}
+          {page === 'details' && (
+            <>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setPage('summary')}
+                  aria-label="Back to Summary"
+                  className="inline-flex items-center gap-1.5 bg-white text-pine text-sm font-semibold pl-3 pr-4 min-h-11 rounded-full hover:bg-white/70 transition-colors"
+                >
+                  <Icon name="arrowLeft" size={18} />
+                  Summary
+                </button>
+                <h1 className="text-3xl lg:text-4xl font-semibold text-pine">Details</h1>
               </div>
+              {/* content: bins + sidebar */}
+              {noZones ? <NoZonesNotice /> : (
+              <div className="flex flex-col lg:flex-row gap-6">
 
-              {/* right: alerts panel */}
-              <aside className="w-full lg:w-72 xl:w-80 shrink-0 space-y-3">
-                <div ref={alertsRef} className="flex items-center justify-between scroll-mt-4">
-                  <h2 className="text-xs uppercase tracking-widest text-stone-400 font-semibold">Alerts</h2>
-                  {unreadCount > 0 && (
-                    <div className="flex items-center gap-3">
+                {/* left: bins grid */}
+                <div ref={binsRef} className="flex-1 min-w-0 space-y-4 scroll-mt-4">
+                  {/* filters */}
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <div className="flex items-center bg-white rounded-xl border border-stone-200 p-0.5 text-xs" role="group" aria-label="View">
+                      {(['cards', 'map'] as const).map(mode => (
+                        <button key={mode} onClick={() => { setViewMode(mode); setMapFocus(null) }} aria-pressed={viewMode === mode}
+                          className={`px-3 py-1.5 rounded-[10px] font-medium transition-colors ${viewMode === mode ? 'bg-teal text-ivory' :'text-stone-400 hover:text-stone-600'}`}
+                        >{mode === 'cards' ? 'Cards' : 'Map'}</button>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                      <span className="text-stone-400 font-medium mr-1">Zone:</span>
+                      <select value={filterZone} onChange={e => setFilterZone(e.target.value as any)}
+                        className="bg-transparent font-medium text-forest outline-none cursor-pointer pr-1">
+                        <option value="All">All</option>
+                        {visibleZones.map(z => <option key={z} value={z}>{z}</option>)}
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
+                      <span className="text-stone-400 font-medium mr-1">Status:</span>
+                      <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as any)}
+                        className="bg-transparent font-medium text-forest outline-none cursor-pointer pr-1">
+                        <option value="All">All</option>
+                        <option value="critical">Critical</option>
+                        <option value="warn">Warning</option>
+                        <option value="ok">OK</option>
+                        <option value="offline">Offline</option>
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
+                      <span className="text-stone-400 font-medium mr-1">Sort:</span>
+                      <select value={sortBy} onChange={e => setSortBy(e.target.value as any)}
+                        className="bg-transparent font-medium text-forest outline-none cursor-pointer pr-1">
+                        <option value="fill">Fill % (high→low)</option>
+                        <option value="status">Status</option>
+                        <option value="zone">Zone</option>
+                        <option value="name">Name</option>
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
+                      <span className="text-stone-400 font-medium">Alert at</span>
+                      {/* -/+ look the same in every browser (ipad safari has no number arrows); before: pads the tap area */}
                       <button
-                        onClick={clearAllAlerts}
-                        className="relative text-[10px] font-semibold text-stone-400 hover:text-forest transition-colors before:absolute before:-inset-x-2 before:-inset-y-3"
-                      >Clear all</button>
-                      <span className="text-[10px] bg-rose/25 text-pine font-semibold px-2 py-0.5 rounded-full">{unreadCount} active</span>
+                        onClick={() => setAlertThreshold(t => Math.max(10, t - 5))}
+                        disabled={alertThreshold <= 10}
+                        aria-label="Lower alert threshold"
+                        className="relative w-4 h-4 flex items-center justify-center font-semibold text-stone-400 hover:text-forest disabled:text-stone-200 transition-colors before:absolute before:-inset-x-1.5 before:-inset-y-3.5"
+                      >−</button>
+                      <input
+                        type="number" min={10} max={100} step={5} value={alertThreshold}
+                        onChange={e => setAlertThreshold(Math.min(100, Math.max(10, Number(e.target.value) || 0)))}
+                        aria-label="Alert threshold"
+                        className="w-7 text-center bg-transparent font-medium text-forest outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                      />
+                      <span className="text-stone-400 font-medium">%</span>
+                      <button
+                        onClick={() => setAlertThreshold(t => Math.min(100, t + 5))}
+                        disabled={alertThreshold >= 100}
+                        aria-label="Raise alert threshold"
+                        className="relative w-4 h-4 flex items-center justify-center font-semibold text-stone-400 hover:text-forest disabled:text-stone-200 transition-colors before:absolute before:-inset-x-1.5 before:-inset-y-3.5"
+                      >+</button>
+                    </div>
+
+                    <span className="ml-auto text-xs text-stone-400 font-mono">{filteredBins.length} bin{filteredBins.length !== 1 ? 's' : ''}</span>
+                  </div>
+
+                  {/* grid or map */}
+                  {shownCount === 0 ? (
+                    <div className="py-16 text-center text-stone-400">
+                      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-2"><path d="M4 7h16M9 7V4h6v3M10 11v6M14 11v6M6 7l1 13h10l1-13"/></svg>
+                      <p className="text-sm">No bins match these filters.</p>
+                    </div>
+                  ) : viewMode === 'map' ? (
+                    <BinMap
+                      bins={mapBins}
+                      fitKey={filteredBins.map(b => b.id).join()}
+                      selectedId={mapBinId}
+                      focus={mapFocus}
+                      onSelect={setMapBinId}
+                      onClosePopup={() => setMapBinId(null)}
+                      onOpenDetail={setSelectedBin}
+                    />
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                      {filteredBins.map(bin => (
+                        <BinCard key={bin.id} bin={bin} onClick={() => setSelectedBin(bin)} onShowOnMap={() => showOnMap(bin.id)} highlighted={bin.id === mapBinId} />
+                      ))}
                     </div>
                   )}
                 </div>
 
-                <div className="space-y-2 max-h-[600px] overflow-y-auto pr-0.5">
-                  {visibleAlerts.length === 0 ? (
-                    <div className="py-10 text-center text-stone-400">
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-1"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>
-                      <p className="text-xs">No active alerts</p>
-                    </div>
-                  ) : visibleAlerts.map(a => (
-                    <AlertItem key={a.id} alert={a} onDismiss={dismissAlert} onSelect={alert => showOnMap(alert.binId)} />
-                  ))}
-                </div>
-
-                {/* summary stats */}
-                <div className="bg-white rounded-2xl border border-stone-200 p-4 mt-4">
-                  <p className="text-[11px] uppercase tracking-widest text-stone-400 font-semibold mb-3">Landfill Activity</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    {[
-                      { label: 'Total Bins', value: myBins.length, color: 'text-forest' },
-                      { label: 'Critical', value: myBins.filter(b => binStatus(b) === 'critical').length, color: 'text-status-critical-ink' },
-                      { label: 'Warning', value: myBins.filter(b => binStatus(b) === 'warn').length, color: 'text-status-warn-ink' },
-                      { label: 'Offline', value: myBins.filter(b => b.sensorStatus === 'offline').length, color: 'text-status-offline-ink' },
-                    ].map(s => (
-                      <div key={s.label} className="text-center py-2 bg-sage rounded-xl">
-                        <p className={`font-mono font-bold text-xl ${s.color}`}>{s.value}</p>
-                        <p className="text-[10px] text-stone-400 mt-0.5">{s.label}</p>
+                {/* right: alerts panel */}
+                <aside className="w-full lg:w-72 xl:w-80 shrink-0 space-y-3">
+                  <div ref={alertsRef} className="flex items-center justify-between scroll-mt-4">
+                    <h2 className="text-xs uppercase tracking-widest text-stone-400 font-semibold">Alerts</h2>
+                    {unreadCount > 0 && (
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={clearAllAlerts}
+                          className="relative text-[10px] font-semibold text-stone-400 hover:text-forest transition-colors before:absolute before:-inset-x-2 before:-inset-y-3"
+                        >Clear all</button>
+                        <span className="text-[10px] bg-rose/25 text-pine font-semibold px-2 py-0.5 rounded-full">{unreadCount} active</span>
                       </div>
+                    )}
+                  </div>
+
+                  <div data-lenis-prevent className="space-y-2 max-h-[600px] overflow-y-auto pr-0.5">
+                    {visibleAlerts.length === 0 ? (
+                      <div className="py-10 text-center text-stone-400">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-1"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>
+                        <p className="text-xs">No active alerts</p>
+                      </div>
+                    ) : visibleAlerts.map(a => (
+                      <AlertItem key={a.id} alert={a} onDismiss={dismissAlert} onSelect={alert => showOnMap(alert.binId)} />
                     ))}
                   </div>
-                  <div className="mt-3 pt-3 border-t border-stone-100">
-                    <div className="flex justify-between text-xs mb-1.5">
-                      <span className="text-stone-400">Landfill activity</span>
-                      <span className="font-mono font-semibold text-forest">
-                        {Math.round(myBins.reduce((s, b) => s + avgFill(b), 0) / Math.max(1, myBins.length))}%
-                      </span>
+
+                  {/* summary stats */}
+                  <div className="bg-white rounded-2xl border border-stone-200 p-4 mt-4">
+                    <p className="text-[11px] uppercase tracking-widest text-stone-400 font-semibold mb-3">Landfill Activity</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { label: 'Total Bins', value: myBins.length, color: 'text-forest' },
+                        { label: 'Critical', value: myBins.filter(b => binStatus(b) === 'critical').length, color: 'text-status-critical-ink' },
+                        { label: 'Warning', value: myBins.filter(b => binStatus(b) === 'warn').length, color: 'text-status-warn-ink' },
+                        { label: 'Offline', value: myBins.filter(b => b.sensorStatus === 'offline').length, color: 'text-status-offline-ink' },
+                      ].map(s => (
+                        <div key={s.label} className="text-center py-2 bg-sage rounded-xl">
+                          <p className={`font-mono font-bold text-xl ${s.color}`}>{s.value}</p>
+                          <p className="text-[10px] text-stone-400 mt-0.5">{s.label}</p>
+                        </div>
+                      ))}
                     </div>
-                    <div className="h-2 bg-stone-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-olive rounded-full" style={{ width: `${Math.round(myBins.reduce((s, b) => s + avgFill(b), 0) / Math.max(1, myBins.length))}%` }} />
+                    <div className="mt-3 pt-3 border-t border-stone-100">
+                      <div className="flex justify-between text-xs mb-1.5">
+                        <span className="text-stone-400">Landfill activity</span>
+                        <span className="font-mono font-semibold text-forest">
+                          {Math.round(myBins.reduce((s, b) => s + avgFill(b), 0) / Math.max(1, myBins.length))}%
+                        </span>
+                      </div>
+                      <div className="h-2 bg-stone-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-olive rounded-full" style={{ width: `${Math.round(myBins.reduce((s, b) => s + avgFill(b), 0) / Math.max(1, myBins.length))}%` }} />
+                      </div>
                     </div>
                   </div>
-                </div>
-              </aside>
-            </div>
-            )}
-          </>
-        )}
-
-        {/* manage tab */}
-        {page === 'admin' && currentRole === 'editor' && (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="font-display text-2xl text-forest">Staff &amp; Zone Management</h2>
-                <p className="text-sm text-stone-400 mt-0.5">Manage roles and zone assignments for your team.</p>
+                </aside>
               </div>
-              <span className="text-xs bg-mint/20 text-mint-dark px-3 py-1.5 rounded-full font-semibold">Editors only</span>
-            </div>
+              )}
+            </>
+          )}
 
-            <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-stone-100 bg-sage">
-                    <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Name</th>
-                    <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Email</th>
-                    <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Role</th>
-                    <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold hidden md:table-cell">Zones</th>
-                    <th className="px-5 py-3" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {staffList.map((member, i) => (
-                    <Fragment key={member.id}>
-                      <tr className={`border-b border-stone-50 hover:bg-sage/50 transition-colors ${i === staffList.length - 1 ? 'border-0' : ''}`}>
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-7 h-7 rounded-full bg-mint/20 flex items-center justify-center text-xs font-bold text-mint-dark">
-                              {member.name.split(' ').map(n => n[0]).join('')}
-                            </div>
-                            <span className="font-medium text-forest">{member.name}</span>
-                          </div>
-                        </td>
-                        <td className="px-5 py-3.5 text-stone-400 font-mono text-xs">{member.email}</td>
-                        <td className="px-5 py-3.5">
-                          <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${member.role === 'editor' ? 'bg-mint/20 text-mint-dark' : 'bg-stone-100 text-stone-500'}`}>
-                            {member.role}
-                          </span>
-                        </td>
-                        <td className="px-5 py-3.5 hidden md:table-cell">
-                          <div className="flex flex-wrap gap-1">
-                            {member.zones.map(z => (
-                              <span key={z} className="text-[10px] bg-sage-dark text-stone-600 px-2 py-0.5 rounded-md">{z}</span>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="px-5 py-3.5 text-right">
-                          <button
-                            onClick={() => setEditingStaff(editingStaff === member.id ? null : member.id)}
-                            className="text-xs text-stone-400 hover:text-forest transition-colors font-medium"
-                          >
-                            {editingStaff === member.id ? 'Done' : 'Edit'}
-                          </button>
-                        </td>
-                      </tr>
-                      {editingStaff === member.id && (
-                        <tr key={`${member.id}-edit`} className="bg-sage/40">
-                          <td colSpan={5} className="px-5 py-4">
-                            <div className="space-y-3">
-                              <div className="flex items-center gap-3">
-                                <span className="text-xs font-semibold text-stone-500">Role:</span>
-                                <button
-                                  onClick={() => toggleStaffRole(member.id)}
-                                  className="text-xs px-3 py-1.5 rounded-lg border border-stone-200 bg-white hover:border-mint transition-colors font-medium"
-                                >
-                                  Toggle → {member.role === 'editor' ? 'viewer' : 'editor'}
-                                </button>
+          {/* manage tab */}
+          {page === 'admin' && currentRole === 'editor' && (
+            <div className="space-y-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="font-display text-2xl text-forest">Staff &amp; Zone Management</h2>
+                  <p className="text-sm text-stone-400 mt-0.5">Manage roles and zone assignments for your team.</p>
+                </div>
+                <span className="text-xs bg-mint/20 text-mint-dark px-3 py-1.5 rounded-full font-semibold">Editors only</span>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-stone-100 bg-sage">
+                      <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Name</th>
+                      <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Email</th>
+                      <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Role</th>
+                      <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold hidden md:table-cell">Zones</th>
+                      <th className="px-5 py-3" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {staffList.map((member, i) => (
+                      <Fragment key={member.id}>
+                        <tr className={`border-b border-stone-50 hover:bg-sage/50 transition-colors ${i === staffList.length - 1 ? 'border-0' : ''}`}>
+                          <td className="px-5 py-3.5">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-7 h-7 rounded-full bg-mint/20 flex items-center justify-center text-xs font-bold text-mint-dark">
+                                {member.name.split(' ').map(n => n[0]).join('')}
                               </div>
-                              <div>
-                                <p className="text-xs font-semibold text-stone-500 mb-2">Zone assignments:</p>
-                                <div className="flex flex-wrap gap-2">
-                                  {ALL_ZONES.map(zone => (
-                                    <button
-                                      key={zone}
-                                      onClick={() => toggleZoneAssignment(member.id, zone)}
-                                      className={`text-xs px-3 py-1.5 rounded-lg border transition-colors font-medium ${
-                                        member.zones.includes(zone)
-                                          ? 'bg-mint/20 border-mint text-mint-dark'
-                                          : 'bg-white border-stone-200 text-stone-400 hover:border-stone-300'
-                                      }`}
-                                    >
-                                      {zone}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
+                              <span className="font-medium text-forest">{member.name}</span>
                             </div>
                           </td>
+                          <td className="px-5 py-3.5 text-stone-400 font-mono text-xs">{member.email}</td>
+                          <td className="px-5 py-3.5">
+                            <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${member.role === 'editor' ? 'bg-mint/20 text-mint-dark' : 'bg-stone-100 text-stone-500'}`}>
+                              {member.role}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3.5 hidden md:table-cell">
+                            <div className="flex flex-wrap gap-1">
+                              {member.zones.map(z => (
+                                <span key={z} className="text-[10px] bg-sage-dark text-stone-600 px-2 py-0.5 rounded-md">{z}</span>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-5 py-3.5 text-right">
+                            <button
+                              onClick={() => setEditingStaff(editingStaff === member.id ? null : member.id)}
+                              className="text-xs text-stone-400 hover:text-forest transition-colors font-medium"
+                            >
+                              {editingStaff === member.id ? 'Done' : 'Edit'}
+                            </button>
+                          </td>
                         </tr>
-                      )}
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
+                        {editingStaff === member.id && (
+                          <tr key={`${member.id}-edit`} className="bg-sage/40">
+                            <td colSpan={5} className="px-5 py-4">
+                              <div className="space-y-3">
+                                <div className="flex items-center gap-3">
+                                  <span className="text-xs font-semibold text-stone-500">Role:</span>
+                                  <button
+                                    onClick={() => toggleStaffRole(member.id)}
+                                    className="text-xs px-3 py-1.5 rounded-lg border border-stone-200 bg-white hover:border-mint transition-colors font-medium"
+                                  >
+                                    Toggle → {member.role === 'editor' ? 'viewer' : 'editor'}
+                                  </button>
+                                </div>
+                                <div>
+                                  <p className="text-xs font-semibold text-stone-500 mb-2">Zone assignments:</p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {ALL_ZONES.map(zone => (
+                                      <button
+                                        key={zone}
+                                        onClick={() => toggleZoneAssignment(member.id, zone)}
+                                        className={`text-xs px-3 py-1.5 rounded-lg border transition-colors font-medium ${
+                                          member.zones.includes(zone)
+                                            ? 'bg-mint/20 border-mint text-mint-dark'
+                                            : 'bg-white border-stone-200 text-stone-400 hover:border-stone-300'
+                                        }`}
+                                      >
+                                        {zone}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* viewers can't open admin */}
-        {page === 'admin' && currentRole !== 'editor' && (
-          <div className="py-24 text-center">
-            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-3"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
-            <p className="text-stone-500 text-sm">Editor access required.</p>
-          </div>
-        )}
+          {/* viewers can't open admin */}
+          {page === 'admin' && currentRole !== 'editor' && (
+            <div className="py-24 text-center">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-3"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+              <p className="text-stone-500 text-sm">Editor access required.</p>
+            </div>
+          )}
+        </div>
       </main>
 
       {/* bin detail modal */}
