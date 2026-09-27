@@ -13,6 +13,15 @@
   --color-teal: #1B5B65; /* info, links, map, selected states */
   --color-olive: #798F53; /* calm, "all good"; too light for text */
   --color-rose: #C88582; /* only for things that need attention; too light for text */
+  /* soft tints and text shades for the summary tiles (from the mockups) */
+  --color-teal-soft: #DCE8E9; /* info tiles */
+  --color-olive-soft: #E3EAD6; /* calm tiles, "good" pill */
+  --color-olive-ink: #3E5325; /* text on olive-soft */
+  --color-pine-muted: #5B6B60; /* small labels on light backgrounds */
+  --color-mist: #B9C4B4; /* small labels and idle icons on pine */
+  --color-critical-soft: #F2DAD6;
+  --color-warn-soft: #F3E3BF;
+  --color-offline-soft: #E6E4DA;
 
   /* older names the app already uses, remapped onto the palette */
   --color-forest: #0F2E23; /* pine */
