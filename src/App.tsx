@@ -1,9 +1,11 @@
-import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
-import type { KeyboardEvent } from 'react'
+import { useState, useMemo, useEffect, useLayoutEffect, useRef, Fragment, createContext, useContext } from 'react'
+import type { KeyboardEvent, ReactNode, RefObject } from 'react'
 import { divIcon, latLngBounds } from 'leaflet'
 import type { LatLngBounds, LatLngTuple, Layer, Point } from 'leaflet'
 import { MapContainer, TileLayer, ImageOverlay, Pane, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
+import Lenis from 'lenis'
+import 'lenis/dist/lenis.css'
 import logoUrl from './imports/logo.png'
 import { mockBins } from './data/mockBins'
 import { campusBoundary } from './data/campusBoundary'
@@ -65,6 +67,10 @@ interface Alert {
   message: string
   severity: 'info' | 'warn' | 'critical'
   time: string
+  // what tripped it, for the short summary lines ("landfill 97%", "sensor offline")
+  kind: 'fill' | 'offline' | 'battery'
+  stream?: Stream
+  value?: number
 }
 
 interface StaffMember {
@@ -139,6 +145,16 @@ const STAFF: StaffMember[] = [
 
 // one zone per building, so staff can filter by location
 const TRIBINS: Tribin[] = mockBins as Tribin[]
+
+// demo only: the same bins as if just emptied (a third of each fill, sensors back online),
+// shown to person 3 so the "all clear" look can be previewed. the header flags it as sample data
+const SAMPLE_USER_ID = 's3'
+const SAMPLE_CLEAR_BINS: Tribin[] = TRIBINS.map(b => ({
+  ...b,
+  compartments: b.compartments.map(c => ({ ...c, fill: Math.round(c.fill / 3) })),
+  sensorStatus: 'online',
+  lastUpdated: b.sensorStatus === 'offline' ? '1 min ago' : b.lastUpdated,
+}))
 
 const ALL_ZONES: Zone[] = [
     ...new Set(TRIBINS.map(bin => bin.zone))
@@ -868,7 +884,7 @@ function BinMap(props: BinMapProps) {
 
   return (
     // isolate keeps leaflet's z-indexes (up to 1000) below the sticky nav and the detail popup
-    <div className="relative isolate h-[60vh] min-h-[320px] max-h-[640px] bg-white rounded-2xl border border-stone-200/80 overflow-hidden">
+    <div data-map data-lenis-prevent className="relative isolate h-[60vh] min-h-[320px] max-h-[640px] bg-white rounded-2xl border border-stone-200/80 overflow-hidden scroll-mt-4">
       <MapContainer {...initial} maxZoom={MAX_ZOOM} maxBounds={MAP_LIMIT} maxBoundsViscosity={1} className="h-full w-full">
         <BaseMap />
         <CampusFog />
@@ -879,19 +895,541 @@ function BinMap(props: BinMapProps) {
   )
 }
 
+// pages and navigation
+
+type Page = 'summary' | 'details' | 'pickup' | 'history' | 'admin'
+
+// tabler icons (MIT, tabler.io/icons), inlined like the app's other svgs
+const ICONS = {
+  home: <><path d="M5 12l-2 0l9 -9l9 9l-2 0" /><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7" /><path d="M9 21v-6a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v6" /></>,
+  listCheck: <><path d="M3.5 5.5l1.5 1.5l2.5 -2.5" /><path d="M3.5 11.5l1.5 1.5l2.5 -2.5" /><path d="M3.5 17.5l1.5 1.5l2.5 -2.5" /><path d="M11 6l9 0" /><path d="M11 12l9 0" /><path d="M11 18l9 0" /></>,
+  chartLine: <><path d="M4 19l16 0" /><path d="M4 15l4 -6l4 2l4 -5l4 4" /></>,
+  settings: <><path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z" /><path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" /></>,
+  bell: <><path d="M10 5a2 2 0 1 1 4 0a7 7 0 0 1 4 6v3a4 4 0 0 0 2 3h-16a4 4 0 0 0 2 -3v-3a7 7 0 0 1 4 -6" /><path d="M9 17v1a3 3 0 0 0 6 0v-1" /></>,
+  mapPin: <><path d="M9 11a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" /><path d="M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 11.314 0z" /></>,
+  layoutGrid: <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></>,
+  circleCheck: <><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" /><path d="M9 12l2 2l4 -4" /></>,
+  arrowRight: <><path d="M5 12l14 0" /><path d="M13 18l6 -6" /><path d="M13 6l6 6" /></>,
+  arrowLeft: <><path d="M5 12l14 0" /><path d="M5 12l6 6" /><path d="M5 12l6 -6" /></>,
+}
+
+function Icon({ name, size = 20 }: { name: keyof typeof ICONS; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
+      {ICONS[name]}
+    </svg>
+  )
+}
+
+const NAV_ITEMS: { page: Page; label: string; icon: keyof typeof ICONS; editorsOnly?: boolean }[] = [
+  { page: 'summary', label: 'Summary', icon: 'home' },
+  { page: 'details', label: 'Details', icon: 'layoutGrid' },
+  { page: 'pickup', label: 'Pickup List', icon: 'listCheck' },
+  { page: 'history', label: 'History', icon: 'chartLine' },
+  { page: 'admin', label: 'Admin', icon: 'settings', editorsOnly: true },
+]
+
+// slim sidebar on wide landscape screens (desk: ipad landscape, desktop), floating pill at the
+// bottom otherwise (phones, and tablets in portrait, including the 1024px-wide ipad pro).
+// buttons are 48px, a little over apple's 44px minimum
+function NavRail({ page, role, onNavigate }: { page: Page; role: Role; onNavigate: (page: Page) => void }) {
+  const items = NAV_ITEMS.filter(i => !i.editorsOnly || role === 'editor')
+  const button = (i: (typeof NAV_ITEMS)[number]) => (
+    <button
+      key={i.page}
+      onClick={() => onNavigate(i.page)}
+      aria-label={i.label}
+      title={i.label}
+      aria-current={page === i.page ? 'page' : undefined}
+      className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${page === i.page ? 'bg-ivory text-pine' : 'text-mist hover:text-ivory hover:bg-ivory/10'}`}
+    >
+      <Icon name={i.icon} size={22} />
+    </button>
+  )
+  return (
+    <>
+      <nav aria-label="Main" className="hidden desk:flex fixed inset-y-0 left-0 z-40 w-[76px] bg-pine flex-col items-center gap-3 py-5">
+        <img src={logoUrl} alt="Sac State Sustainability" className="w-14 h-auto mb-4" />
+        {items.map(button)}
+      </nav>
+      <nav aria-label="Main" className="desk:hidden fixed bottom-0 inset-x-0 z-40 px-4 pb-[max(12px,env(safe-area-inset-bottom))] pointer-events-none">
+        <div className="pointer-events-auto mx-auto max-w-md bg-pine rounded-full p-1.5 flex justify-between shadow-lg shadow-pine/30">
+          {items.map(button)}
+        </div>
+      </nav>
+    </>
+  )
+}
+
+// avatar + greeting (tap to switch the demo user), synced pill, alert bell
+function TopBar({ userName, role, greeting, syncedLabel, alertCount, sampleData, onSwitchUser, onBell }: {
+  userName: string
+  role: Role
+  greeting: string
+  syncedLabel: string
+  alertCount: number
+  sampleData: boolean
+  onSwitchUser: () => void
+  onBell: () => void
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        onClick={onSwitchUser}
+        title="Switch demo user"
+        aria-label={`${userName}, ${role}. Switch demo user`}
+        className="flex items-center gap-3 min-h-11 text-left rounded-full -ml-1 pl-1 pr-3 hover:bg-white/60 transition-colors"
+      >
+        <span className="w-11 h-11 rounded-full bg-pine text-ivory flex items-center justify-center text-sm font-semibold">
+          {userName.split(' ').map(n => n[0]).join('')}
+        </span>
+        <span className="leading-tight">
+          <span className="block text-xs text-pine-muted">{greeting},</span>
+          <span className="block text-sm font-semibold text-pine">
+            {userName} <span className="font-medium text-pine-muted capitalize">· {role}</span>
+          </span>
+        </span>
+      </button>
+      <div className="ml-auto flex items-center gap-2">
+        {sampleData && (
+          <span title="Person 3 shows the bins as if just emptied, to preview the all-clear look" className="inline-flex items-center bg-teal text-ivory text-xs font-semibold px-3.5 py-2 rounded-full">Sample data</span>
+        )}
+        <span className="hidden sm:inline-flex items-center bg-white text-teal text-xs font-semibold px-3.5 py-2 rounded-full">{syncedLabel}</span>
+        <button
+          onClick={onBell}
+          aria-label={`Alerts, ${alertCount} active`}
+          className="relative w-11 h-11 rounded-full bg-white text-pine flex items-center justify-center hover:bg-white/70 transition-colors"
+        >
+          <Icon name="bell" size={20} />
+          {alertCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 min-w-5 h-5 px-1 rounded-full bg-rose text-pine text-[10px] font-bold flex items-center justify-center">{alertCount}</span>
+          )}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ring on the pine hero: dark track, and critical reads in rose (critical red is too dark on pine)
+function HeroRing({ fill, size = 88 }: { fill: number; size?: number }) {
+  const stroke = 8
+  const r = (size - stroke) / 2
+  const circ = 2 * Math.PI * r
+  const color = fill >= CRITICAL_AT ? '#C88582' : fill >= WARN_AT ? '#D4A13A' : '#798F53'
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }} aria-hidden="true">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#2A4A3E" strokeWidth={stroke} />
+        <circle
+          cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
+          strokeDasharray={circ} strokeDashoffset={circ * (1 - fill / 100)}
+          style={{ transition: 'stroke-dashoffset 0.6s ease' }}
+        />
+      </svg>
+      <span className="absolute inset-0 flex items-center justify-center font-mono text-xl font-bold text-ivory">{fill}%</span>
+    </div>
+  )
+}
+
+function HalfGauge({ pct }: { pct: number }) {
+  const len = Math.PI * 40
+  const arc = 'M10 52 A40 40 0 0 1 90 52'
+  return (
+    <svg viewBox="0 0 100 58" className="w-full max-w-[220px] mx-auto" role="img" aria-label={`Campus average fill ${pct}%`}>
+      <path d={arc} fill="none" stroke="#fff" strokeWidth="9" strokeLinecap="round" />
+      <path d={arc} fill="none" stroke="#1B5B65" strokeWidth="9" strokeLinecap="round" strokeDasharray={len} strokeDashoffset={len * (1 - pct / 100)} />
+      <text x="50" y="50" textAnchor="middle" fontSize="16" fontWeight="600" fill="#0F2E23" fontFamily="'DM Mono', monospace">{pct}%</text>
+    </svg>
+  )
+}
+
+// campus outline and bins as dots, projected like the map (web mercator) but drawn as plain
+// svg, so the home screen never loads the map library
+const SKETCH = (() => {
+  const pad = 8
+  const toXY = ([lng, lat]: [number, number]) => [(lng * Math.PI) / 180, mercatorY(lat)]
+  const pts = campusBoundary.map(toXY)
+  const minX = Math.min(...pts.map(p => p[0])), maxX = Math.max(...pts.map(p => p[0]))
+  const minY = Math.min(...pts.map(p => p[1])), maxY = Math.max(...pts.map(p => p[1]))
+  const k = (100 - 2 * pad) / (maxX - minX)
+  const project = (lng: number, lat: number) => {
+    const [x, y] = toXY([lng, lat])
+    return [pad + (x - minX) * k, pad + (maxY - y) * k] as const
+  }
+  return {
+    height: (maxY - minY) * k + 2 * pad,
+    outline: 'M' + campusBoundary.map(([lng, lat]) => project(lng, lat).map(n => n.toFixed(1)).join(' ')).join('L') + 'Z',
+    project,
+  }
+})()
+
+function CampusSketch({ bins }: { bins: Tribin[] }) {
+  const zones = [...new Set(bins.map(b => b.zone))].map(zone => {
+    const zb = bins.filter(b => b.zone === zone).map(b => SKETCH.project(b.lng, b.lat))
+    return { zone, x: zb.reduce((s, p) => s + p[0], 0) / zb.length, y: Math.min(...zb.map(p => p[1])) }
+  })
+  return (
+    <svg viewBox={`0 0 100 ${SKETCH.height.toFixed(1)}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      <path d={SKETCH.outline} fill="#fff" stroke="#DCE8E9" strokeWidth="1.2" strokeLinejoin="round" />
+      {zones.map(z => (
+        <text key={z.zone} x={z.x} y={z.y - 5} textAnchor="middle" fontSize="4.5" fill="#5B6B60" fontFamily="Outfit, sans-serif">{z.zone}</text>
+      ))}
+      {bins.map(b => {
+        const [x, y] = SKETCH.project(b.lng, b.lat)
+        return <circle key={b.id} cx={x} cy={y} r="2.6" fill={pinHex(b)} stroke="#fff" strokeWidth="0.8" />
+      })}
+    </svg>
+  )
+}
+
+const TILE = 'rounded-3xl p-5 desk:p-6'
+
+// when the current page was opened (performance.now()), set by PageScope
+const PageOpenedAt = createContext(0)
+
+function PageScope({ children }: { children: ReactNode }) {
+  const [openedAt] = useState(() => performance.now())
+  return <PageOpenedAt.Provider value={openedAt}>{children}</PageOpenedAt.Provider>
+}
+
+// the element's children fade and rise into place as they scroll into view (styles in
+// index.css), rippling 70ms apart in on-screen order, once per visit to a page. only lists
+// there on arrival animate: ones that mount later (a filter or cards/map switch) just appear.
+// children are marked here, before the first paint, not in the markup, so they can't get
+// stuck hidden if this never runs
+function useReveal(ref: RefObject<HTMLElement | null>) {
+  const openedAt = useContext(PageOpenedAt)
+  useLayoutEffect(() => {
+    const root = ref.current
+    if (!root || performance.now() - openedAt > 600 || !('IntersectionObserver' in window)) return
+    const items = [...root.children] as HTMLElement[]
+    for (const el of items) el.setAttribute('data-reveal', '')
+    const io = new IntersectionObserver(entries => {
+      entries
+        .filter(e => e.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top || a.boundingClientRect.left - b.boundingClientRect.left)
+        .forEach((e, i) => {
+          const el = e.target as HTMLElement
+          el.style.transitionDelay = `${i * 70}ms`
+          el.setAttribute('data-shown', '')
+          io.unobserve(el)
+        })
+    }, { rootMargin: '0px 0px -6% 0px', threshold: 0.12 })
+    for (const el of items) io.observe(el)
+    return () => io.disconnect()
+  }, [])
+}
+
+// a div whose children get the reveal
+function Reveal({ className, children }: { className?: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useReveal(ref)
+  return <div ref={ref} className={className}>{children}</div>
+}
+
+const STATUS_PILLS: { status: Status; cls: string }[] = [
+  { status: 'critical', cls: 'bg-critical-soft text-status-critical-ink' },
+  { status: 'warn', cls: 'bg-warn-soft text-status-warn-ink' },
+  { status: 'ok', cls: 'bg-olive-soft text-olive-ink' },
+  { status: 'offline', cls: 'bg-offline-soft text-status-offline-ink' },
+]
+
+// one short line per bin for the alerts tile
+function alertLine(a: Alert) {
+  if (a.kind === 'offline') return { text: 'sensor offline', hex: OFFLINE_HEX }
+  if (a.kind === 'battery') return { text: `battery ${a.value}%`, hex: fillHex(WARN_AT) }
+  return { text: `${a.stream?.toLowerCase()} ${a.value}%`, hex: fillHex(a.value ?? 0) }
+}
+
+function SummaryPage({
+  bins, needPickup, syncedLabel, hero, statusCounts, campusAvg, onlineCount, zones, topAlerts, alertCount,
+  onShowOnMap, onOpenDetail, onStatus, onZone, onPickup, onOpenMap, onAlert, onViewAllAlerts,
+}: {
+  bins: Tribin[] // the signed-in user's bins
+  needPickup: number
+  syncedLabel: string
+  hero: Tribin | undefined
+  statusCounts: Record<Status, number>
+  campusAvg: number
+  onlineCount: number
+  zones: { zone: Zone; pickup: number; total: number }[]
+  topAlerts: Alert[]
+  alertCount: number
+  onShowOnMap: (binId: string) => void
+  onOpenDetail: (bin: Tribin) => void
+  onStatus: (status: Status) => void
+  onZone: (zone: Zone) => void
+  onPickup: () => void
+  onOpenMap: () => void
+  onAlert: (binId: string) => void
+  onViewAllAlerts: () => void
+}) {
+  // tiles fade and rise into place as they scroll into view
+  const gridRef = useRef<HTMLDivElement>(null)
+  useReveal(gridRef)
+
+  return (
+    <>
+      <div>
+        <h1 className="text-3xl lg:text-4xl font-semibold text-pine leading-tight">At a glance</h1>
+        <span className="sm:hidden mt-3 inline-flex items-center bg-white text-teal text-xs font-semibold px-3.5 py-2 rounded-full">{syncedLabel}</span>
+      </div>
+
+      {/* bento: 2 columns on phones and portrait tablets, 4 on desk (wide landscape). the pickup tile lists
+          every zone as a row, so more zones grow it instead of adding tiles */}
+      <div ref={gridRef} className="grid grid-cols-2 desk:grid-cols-4 gap-3 desk:gap-4
+        [grid-template-areas:'hero_hero'_'pickup_pickup'_'status_status'_'gauge_map'_'alerts_alerts']
+        md:[grid-template-areas:'hero_hero'_'pickup_pickup'_'status_status'_'map_map'_'gauge_alerts']
+        desk:[grid-template-areas:'hero_hero_gauge_status'_'map_map_pickup_pickup'_'map_map_alerts_alerts']">
+
+        {/* hero: fullest online bin */}
+        {hero ? (
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => onOpenDetail(hero)}
+            onKeyDown={onActivate(() => onOpenDetail(hero))}
+            aria-label={`${hero.name}, fullest bin at ${maxFill(hero)}%. Open details`}
+            className={`[grid-area:hero] ${TILE} bg-pine text-ivory flex items-center gap-5 cursor-pointer`}
+          >
+            <HeroRing fill={maxFill(hero)} />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-mist">Fullest bin</p>
+              <p className="text-2xl font-semibold leading-tight">{hero.name}</p>
+              <p className="text-sm text-mist truncate">{hero.location}, {hero.zone}</p>
+              <button
+                onClick={e => { e.stopPropagation(); onShowOnMap(hero.id) }}
+                className="mt-3 inline-flex items-center gap-1.5 bg-ivory text-pine text-sm font-semibold px-4 min-h-11 rounded-full hover:bg-white transition-colors"
+              >
+                <Icon name="mapPin" size={16} />
+                Show on map
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className={`[grid-area:hero] ${TILE} bg-pine text-ivory`}>
+            <p className="text-xs text-mist">Fullest bin</p>
+            <p className="text-lg font-semibold mt-1">No bins are online right now</p>
+          </div>
+        )}
+
+        {/* status counts as four equal mini-tiles (2x2, or 4 across when the tile is full width on
+            ipad portrait); on desktop they stretch to the tile's height. each opens details for it */}
+        <div className={`[grid-area:status] ${TILE} bg-white flex flex-col`}>
+          <p className="text-xs font-semibold text-pine mb-3">Status</p>
+          <div className="flex-1 grid grid-cols-2 md:grid-cols-4 desk:grid-cols-2 auto-rows-fr gap-2">
+            {STATUS_PILLS.map(s => (
+              <button
+                key={s.status}
+                onClick={() => onStatus(s.status)}
+                aria-label={`${statusCounts[s.status]} ${statusLabel(s.status)}. Show these bins`}
+                className={`flex flex-col justify-center gap-1 min-h-11 px-3.5 desk:px-3 py-2.5 rounded-2xl text-left ${s.cls} hover:brightness-95 transition`}
+              >
+                <span className="text-xs font-semibold">{statusLabel(s.status)}</span>
+                <span className="font-mono text-2xl font-bold leading-none">{statusCounts[s.status]}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className={`[grid-area:gauge] ${TILE} bg-teal-soft flex flex-col`}>
+          <p className="text-xs font-semibold text-teal mb-2">Campus average</p>
+          <div className="flex-1 flex items-center"><HalfGauge pct={campusAvg} /></div>
+          <p className="text-[11px] text-teal text-center mt-1">average fill, {onlineCount} online bins</p>
+        </div>
+
+        {/* the campus is taller than wide, so the full-width ipad-portrait tile gets extra height */}
+        <div className={`[grid-area:map] ${TILE} bg-white flex flex-col gap-3 min-h-[220px] md:min-h-[380px] desk:min-h-[220px]`}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-semibold text-teal">Campus map</p>
+            <button onClick={onOpenMap} className="inline-flex items-center gap-1.5 bg-pine text-ivory text-sm font-semibold px-4 min-h-11 rounded-full hover:bg-forest-light transition-colors">
+              <Icon name="mapPin" size={16} />
+              Open map
+            </button>
+          </div>
+          {/* the sketch fills whatever height the grid gives this tile rather than setting it,
+              so its tall campus shape can't stretch the rows */}
+          <button onClick={onOpenMap} aria-label="Open map" className="relative flex-1 min-h-[140px] rounded-2xl bg-ivory overflow-hidden">
+            <span className="absolute inset-2"><CampusSketch bins={bins} /></span>
+          </button>
+        </div>
+
+        {/* one tile for pickups: the total up top, then a row per zone. rose while anything
+            needs pickup, olive when nothing does. fills the whole area for any number of zones */}
+        <div className={`[grid-area:pickup] ${TILE} flex flex-col ${needPickup === 0 ? 'bg-olive-soft' : 'bg-rose/20'}`}>
+          <button
+            onClick={onPickup}
+            aria-label={needPickup === 0 ? 'All clear, no bins need pickup. Show all bins' : `${needPickup} ${needPickup === 1 ? 'bin needs' : 'bins need'} pickup. Show bins, fullest first`}
+            className="text-left rounded-2xl -m-2 p-2 hover:bg-white/40 transition-colors"
+          >
+            {/* the count is the title */}
+            <span className="flex items-start justify-between gap-3 w-full text-pine">
+              {needPickup === 0 ? (
+                <span>
+                  <span className="block text-3xl font-bold leading-none">All clear</span>
+                  <span className="block text-sm mt-1.5 text-olive-ink">No bins need pickup</span>
+                </span>
+              ) : (
+                <span className="text-3xl font-bold leading-tight">
+                  <span className="font-mono">{needPickup}</span> {needPickup === 1 ? 'bin needs' : 'bins need'} pickup
+                </span>
+              )}
+              <span className="shrink-0 mt-1.5"><Icon name={needPickup === 0 ? 'circleCheck' : 'arrowRight'} size={22} /></span>
+            </span>
+          </button>
+          <div className="mt-4 border-t border-pine/10 divide-y divide-pine/10">
+            {zones.map(z => (
+              <button
+                key={z.zone}
+                onClick={() => onZone(z.zone)}
+                aria-label={`${z.zone}: ${z.pickup} of ${z.total} bins need pickup. Show this zone`}
+                className="w-full flex items-center gap-3 min-h-11 py-2 px-2 -mx-2 text-left rounded-xl hover:bg-white/40 transition-colors"
+              >
+                <span className="flex-1 text-sm font-semibold text-pine">{z.zone}</span>
+                <span className="text-sm text-pine"><span className="font-mono font-bold">{z.pickup}</span> of {z.total} bins</span>
+                <Icon name="arrowRight" size={16} />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className={`[grid-area:alerts] ${TILE} bg-white`}>
+          <div className="flex items-center gap-2 mb-2">
+            <p className="text-xs font-semibold text-pine">Alerts</p>
+            {alertCount > 0 && <span className="text-[10px] bg-rose/25 text-pine font-semibold px-2 py-0.5 rounded-full">{alertCount} active</span>}
+            <button onClick={onViewAllAlerts} className="ml-auto text-sm font-semibold text-teal min-h-11 px-2 -mr-2 hover:underline">View all</button>
+          </div>
+          {topAlerts.length === 0 ? (
+            <p className="text-sm text-pine-muted py-2">No active alerts</p>
+          ) : (
+            <div className="space-y-1">
+              {topAlerts.map(a => {
+                const line = alertLine(a)
+                return (
+                  <button key={a.id} onClick={() => onAlert(a.binId)} className="w-full flex items-center gap-3 min-h-11 text-left rounded-xl px-2 -mx-2 hover:bg-ivory transition-colors">
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: line.hex }} />
+                    <span className="text-sm min-w-0 truncate">
+                      <span className="font-semibold text-pine">{a.binName}</span> <span className="text-pine-muted">{line.text}</span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  )
+}
+
+function ComingSoon({ title, icon, text }: { title: string; icon: keyof typeof ICONS; text: string }) {
+  return (
+    <>
+      <h1 className="text-3xl lg:text-4xl font-semibold text-pine">{title}</h1>
+      <Reveal>
+      <div className={`${TILE} bg-white py-16 text-center`}>
+        <span className="mx-auto mb-4 w-14 h-14 rounded-full bg-olive-soft text-olive-ink flex items-center justify-center">
+          <Icon name={icon} size={26} />
+        </span>
+        <p className="text-lg font-semibold text-pine">Coming soon</p>
+        <p className="text-sm text-pine-muted mt-1 max-w-sm mx-auto">{text}</p>
+      </div>
+      </Reveal>
+    </>
+  )
+}
+
+// role and zone controls for one person, shared by the admin table and the phone cards.
+// nobody can change their own role, and only editors reach admin, so an editor always remains
+function StaffEditor({ member, isSelf, onToggleRole, onToggleZone }: {
+  member: StaffMember
+  isSelf: boolean
+  onToggleRole: () => void
+  onToggleZone: (zone: Zone) => void
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="text-xs font-semibold text-stone-500">Role:</span>
+        <button
+          onClick={onToggleRole}
+          disabled={isSelf}
+          className="text-xs min-h-11 px-4 rounded-lg border border-stone-200 bg-white hover:border-mint transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-stone-200"
+        >
+          Toggle → {member.role === 'editor' ? 'viewer' : 'editor'}
+        </button>
+        {isSelf && <span className="text-xs text-stone-500">You can't change your own role. Ask another editor.</span>}
+      </div>
+      <div>
+        <p className="text-xs font-semibold text-stone-500 mb-2">Zone assignments:</p>
+        <div className="flex flex-wrap gap-2">
+          {ALL_ZONES.map(zone => (
+            <button
+              key={zone}
+              onClick={() => onToggleZone(zone)}
+              className={`text-xs min-h-11 px-4 rounded-lg border transition-colors font-medium ${
+                member.zones.includes(zone)
+                  ? 'bg-mint/20 border-mint text-mint-dark'
+                  : 'bg-white border-stone-200 text-stone-400 hover:border-stone-300'
+              }`}
+            >
+              {zone}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// a viewer with no zones assigned sees this instead of bins
+function NoZonesNotice() {
+  return (
+    <div className={`${TILE} bg-white py-16 text-center`}>
+      <span className="mx-auto mb-4 w-14 h-14 rounded-full bg-teal-soft text-teal flex items-center justify-center">
+        <Icon name="mapPin" size={26} />
+      </span>
+      <p className="text-lg font-semibold text-pine">No zones assigned yet</p>
+      <p className="text-sm text-pine-muted mt-1 max-w-sm mx-auto">Ask an admin to add you to a zone. Its bins and alerts will show up here.</p>
+    </div>
+  )
+}
+
+// "2 min ago" / "3 hours ago" -> minutes
+function minutesAgo(label: string) {
+  const m = label.match(/(\d+)\s*(min|hour)/)
+  return m ? Number(m[1]) * (m[2] === 'hour' ? 60 : 1) : Infinity
+}
+
 // main app
 
 export default function App() {
-  const [currentRole, setCurrentRole] = useState<Role>('editor')
+  // demo sign-in: the avatar cycles person 1 (editor), person 2 (viewer), person 3 (viewer, sample data)
+  const [currentUserId, setCurrentUserId] = useState('s1')
   const [filterZone, setFilterZone] = useState<Zone | 'All'>('All')
   const [sortBy, setSortBy] = useState<'fill' | 'zone' | 'status' | 'name'>('fill')
   const [filterStatus, setFilterStatus] = useState<Status | 'All'>('All')
   const [alertThreshold, setAlertThreshold] = useState(80)
   const [dismissedIds, setDismissedIds] = useState<string[]>([])
   const [selectedBin, setSelectedBin] = useState<Tribin | null>(null)
-  const [activeTab, setActiveTab] = useState<'overview' | 'manage'>('overview')
+  const [page, setPage] = useState<Page>('summary')
   const [editingStaff, setEditingStaff] = useState<string | null>(null)
   const [staffList, setStaffList] = useState<StaffMember[]>(STAFF)
+
+  // role and zones come from the staff list, so changes in admin apply right away.
+  // editors see every bin; viewers only bins in the zones an admin assigned them.
+  // display filtering only: real access control has to live in the backend
+  const currentUser = staffList.find(s => s.id === currentUserId) ?? staffList[0]
+  const currentRole = currentUser.role
+  const visibleZones = currentRole === 'editor' ? ALL_ZONES : ALL_ZONES.filter(z => currentUser.zones.includes(z))
+  const zonesKey = visibleZones.join()
+  const sampleData = currentUserId === SAMPLE_USER_ID
+  const myBins = useMemo(
+    () => (sampleData ? SAMPLE_CLEAR_BINS : TRIBINS).filter(b => visibleZones.includes(b.zone)),
+    [zonesKey, sampleData],
+  )
+  const noZones = myBins.length === 0
+
   const [viewMode, setViewMode] = useState<'cards' | 'map'>('cards')
   // bin whose card is open on the map, highlighted in cards view until the card is closed
   const [mapBinId, setMapBinId] = useState<string | null>(null)
@@ -900,13 +1438,52 @@ export default function App() {
   const binsRef = useRef<HTMLDivElement>(null)
   const alertsRef = useRef<HTMLDivElement>(null)
 
-  // scroll after render, and only when the target isn't already on screen
+  // eased, gliding wheel/trackpad scrolling (like framer's smooth scroll). touch keeps the device's
+  // own scrolling, and lenis turns smoothing off when "reduce motion" is set. the map and the
+  // alerts list opt out with data-lenis-prevent so they keep their own wheel behavior
+  const lenisRef = useRef<Lenis | null>(null)
+  useEffect(() => {
+    const lenis = new Lenis({ autoRaf: true, lerp: 0.1, smoothWheel: true, syncTouch: false })
+    lenisRef.current = lenis
+    return () => {
+      lenis.destroy()
+      lenisRef.current = null
+    }
+  }, [])
+
+  // each page starts at the top, straight away since its content is new (runs before the
+  // scroll request below, which may then glide it)
+  useEffect(() => {
+    const lenis = lenisRef.current
+    if (lenis) {
+      lenis.resize() // the new page's height, or later scrolls get clamped to the old one
+      lenis.scrollTo(0, { immediate: true, force: true })
+    } else {
+      window.scrollTo(0, 0)
+    }
+  }, [page])
+
+  // a filter or open card from before a user/zone change may point outside the new zones
+  useEffect(() => {
+    setFilterZone('All')
+    setMapBinId(null)
+    setSelectedBin(null)
+  }, [currentUserId, zonesKey])
+
+  // scroll after render, and only when the target isn't fully on screen. in map view the target
+  // is the map itself, so a jumped-to pin (aimed low in the map) clears the floating tab bar
   useEffect(() => {
     if (!scrollReq) return
-    const el = { bins: binsRef, alerts: alertsRef }[scrollReq.target].current
+    const holder = { bins: binsRef, alerts: alertsRef }[scrollReq.target].current
+    const el = (scrollReq.target === 'bins' && holder?.querySelector<HTMLElement>('[data-map]')) || holder
     if (!el) return
-    const { top } = el.getBoundingClientRect()
-    if (top < 56 || top > window.innerHeight - 120) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const { top, bottom } = el.getBoundingClientRect()
+    const tabBar = !window.matchMedia('(min-width: 1024px) and (orientation: landscape)').matches // same as desk:
+    const visibleBottom = window.innerHeight - (tabBar ? 96 : 0)
+    if (top >= 8 && bottom <= visibleBottom) return
+    const lenis = lenisRef.current
+    if (lenis) lenis.scrollTo(el, { force: true }) // lenis honors the target's scroll-mt-4 gap
+    else el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [scrollReq])
 
   function requestScroll(target: 'bins' | 'alerts') {
@@ -916,11 +1493,12 @@ export default function App() {
   // alerts rebuild when the threshold changes
   const alerts = useMemo<Alert[]>(() => {
     const out: Alert[] = []
-    for (const bin of TRIBINS) {
+    for (const bin of myBins) {
       if (bin.sensorStatus === 'offline') {
         out.push({
           id: `${bin.id}-offline`, binId: bin.id, binName: bin.name, zone: bin.zone,
           message: `Sensor offline, last contact ${bin.lastUpdated}`, severity: 'critical', time: bin.lastUpdated,
+          kind: 'offline',
         })
       } else {
         for (const c of bin.compartments) {
@@ -930,6 +1508,7 @@ export default function App() {
               id: `${bin.id}-${c.label}`, binId: bin.id, binName: bin.name, zone: bin.zone,
               message: `${c.label} compartment at ${c.fill}%${isCritical ? ': immediate collection required' : ''}`,
               severity: isCritical ? 'critical' : 'warn', time: bin.lastUpdated,
+              kind: 'fill', stream: c.label, value: c.fill,
             })
           }
         }
@@ -938,21 +1517,46 @@ export default function App() {
         out.push({
           id: `${bin.id}-battery`, binId: bin.id, binName: bin.name, zone: bin.zone,
           message: `Battery low: ${bin.battery}% remaining`, severity: 'warn', time: bin.lastUpdated,
+          kind: 'battery', value: bin.battery,
         })
       }
     }
     return out
-  }, [alertThreshold])
+  }, [alertThreshold, myBins])
 
   const visibleAlerts = alerts.filter(a => !dismissedIds.includes(a.id))
   const unreadCount = visibleAlerts.length
 
-  const fullestBin = useMemo(() => {
-    return [...TRIBINS].sort((a, b) => maxFill(b) - maxFill(a))[0]
-  }, [])
+  // summary numbers. offline sensors report stale fills, so they're left out of fill-based ones
+  const onlineBins = myBins.filter(b => b.sensorStatus === 'online')
+  const needPickup = onlineBins.filter(b => maxFill(b) >= alertThreshold).length
+  const heroBin = [...onlineBins].sort((a, b) => maxFill(b) - maxFill(a))[0]
+  const statusCounts = { critical: 0, warn: 0, ok: 0, offline: 0 }
+  for (const b of myBins) statusCounts[binStatus(b)]++
+  const campusAvg = onlineBins.length ? Math.round(onlineBins.reduce((s, b) => s + avgFill(b), 0) / onlineBins.length) : 0
+  const zoneCounts = visibleZones.map(zone => {
+    const zb = myBins.filter(b => b.zone === zone)
+    return { zone, pickup: zb.filter(b => b.sensorStatus === 'online' && maxFill(b) >= alertThreshold).length, total: zb.length }
+  })
+  const syncedMin = Math.min(...onlineBins.map(b => minutesAgo(b.lastUpdated)))
+  const syncedLabel = !Number.isFinite(syncedMin) ? 'Not synced' : syncedMin < 60 ? `Synced ${syncedMin} min ago` : `Synced ${Math.floor(syncedMin / 60)} hr ago`
+  const hour = new Date().getHours()
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+  const userName = currentUser.name
+
+  // top alerts tile: each bin's most urgent alert, full-critical first, then offline, then the rest
+  const alertRank = (a: Alert) => (a.kind === 'fill' ? ((a.value ?? 0) >= CRITICAL_AT ? 0 : 2) : a.kind === 'offline' ? 1 : 3)
+  const worstPerBin = new Map<string, Alert>()
+  for (const a of visibleAlerts) {
+    const cur = worstPerBin.get(a.binId)
+    if (!cur || alertRank(a) < alertRank(cur) || (alertRank(a) === alertRank(cur) && (a.value ?? 0) > (cur.value ?? 0))) worstPerBin.set(a.binId, a)
+  }
+  const topAlerts = [...worstPerBin.values()]
+    .sort((a, b) => alertRank(a) - alertRank(b) || (b.value ?? 0) - (a.value ?? 0))
+    .slice(0, 3)
 
   const filteredBins = useMemo(() => {
-    let bins = [...TRIBINS]
+    let bins = [...myBins]
     if (filterZone !== 'All') bins = bins.filter(b => b.zone === filterZone)
     if (filterStatus !== 'All') bins = bins.filter(b => binStatus(b) === filterStatus)
     bins.sort((a, b) => {
@@ -966,9 +1570,9 @@ export default function App() {
       return 0
     })
     return bins
-  }, [filterZone, filterStatus, sortBy])
+  }, [myBins, filterZone, filterStatus, sortBy])
 
-  const mapBin = TRIBINS.find(b => b.id === mapBinId) ?? null
+  const mapBin = myBins.find(b => b.id === mapBinId) ?? null
 
   // the picked bin keeps its pin even when the filters hide it
   const mapBins = useMemo(
@@ -978,10 +1582,46 @@ export default function App() {
   const shownCount = viewMode === 'map' ? mapBins.length : filteredBins.length
 
   function showOnMap(binId: string) {
+    setPage('details')
     setViewMode('map')
     setMapBinId(binId)
     setMapFocus(prev => ({ id: binId, n: (prev?.n ?? 0) + 1 }))
     requestScroll('bins')
+  }
+
+  // details, filtered to what was tapped on the summary
+  function openDetails(filter: { status?: Status; zone?: Zone }) {
+    setFilterStatus(filter.status ?? 'All')
+    setFilterZone(filter.zone ?? 'All')
+    setViewMode('cards')
+    setPage('details')
+  }
+
+  // every bin, fullest first, so the ones needing pickup lead
+  function openPickupBins() {
+    setSortBy('fill')
+    openDetails({})
+  }
+
+  // the whole campus, nothing picked
+  function openMap() {
+    openDetails({})
+    setViewMode('map')
+    setMapBinId(null)
+    setMapFocus(null)
+    requestScroll('bins')
+  }
+
+  // jumps from the summary start from all bins; inside details, showOnMap keeps the filters
+  function showOnMapFromSummary(binId: string) {
+    setFilterStatus('All')
+    setFilterZone('All')
+    showOnMap(binId)
+  }
+
+  function openAlerts() {
+    setPage('details')
+    requestScroll('alerts')
   }
 
   function dismissAlert(id: string) {
@@ -1001,6 +1641,7 @@ export default function App() {
   }
 
   function toggleStaffRole(staffId: string) {
+    if (staffId === currentUserId) return // can't change your own role (the button is disabled too)
     setStaffList(prev => prev.map(s =>
       s.id === staffId ? { ...s, role: s.role === 'editor' ? 'viewer' : 'editor' } : s
     ))
@@ -1008,385 +1649,374 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-sage font-sans" style={{ fontFamily: 'Outfit, system-ui, sans-serif' }}>
+      <NavRail page={page} role={currentRole} onNavigate={setPage} />
 
-      {/* nav */}
-      <nav className="sticky top-0 z-40 bg-forest text-white px-5 py-0 flex items-center justify-between h-14 shadow-lg shadow-forest/30">
-        <div className="flex items-center gap-3">
-          <img src={logoUrl} alt="Sac State Sustainability" className="h-10 w-auto object-contain shrink-0" />
+      {/* left padding clears the sidebar on desk; the footer's clears the floating tab bar otherwise */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 desk:pl-[calc(76px+2rem)] desk:pr-8 pt-5 desk:pt-8 pb-6 space-y-5 desk:space-y-6">
+        <TopBar
+          userName={userName}
+          role={currentRole}
+          greeting={greeting}
+          syncedLabel={syncedLabel}
+          alertCount={unreadCount}
+          onSwitchUser={() => setCurrentUserId(id => ({ s1: 's2', s2: 's3' } as Record<string, string>)[id] ?? 's1')}
+          sampleData={sampleData}
+          onBell={openAlerts}
+        />
 
-          <div>
-            <span className="font-bold text-sm tracking-tight">Bin Monitor</span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {/* role toggle, demo only */}
-          <div className="flex items-center gap-1.5 bg-white/10 rounded-full px-3 py-1.5 cursor-pointer" onClick={() => setCurrentRole(r => r === 'editor' ? 'viewer' : 'editor')}>
-            <div className={`w-1.5 h-1.5 rounded-full ${currentRole === 'editor' ? 'bg-olive' : 'bg-ivory/50'}`} />
-            <span className="text-xs font-medium">{currentRole === 'editor' ? 'Person 1' : 'Person 2'}</span>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wider ${currentRole === 'editor' ? 'bg-teal text-ivory' : 'bg-ivory/15 text-ivory/80'}`}>
-              {currentRole}
-            </span>
-          </div>
-
-          {/* alert bell */}
-          <button className="relative p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="Alerts" onClick={() => { setActiveTab('overview'); requestScroll('alerts') }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0" />
-            </svg>
-            {unreadCount > 0 && (
-              <span className="absolute top-1 right-1 w-4 h-4 bg-rose text-pine rounded-full text-[9px] font-bold flex items-center justify-center">{unreadCount}</span>
-            )}
-          </button>
-
-          <span className="hidden sm:block text-white/20 text-sm">|</span>
-
-          <div className="hidden sm:flex items-center gap-2 text-xs text-white/50">
-            <span className="w-1.5 h-1.5 rounded-full bg-status-ok animate-pulse" />
-            Live
-          </div>
-        </div>
-      </nav>
-
-      {/* tab bar, editors get the manage tab */}
-      <div className="bg-white border-b border-stone-200 px-5">
-        <div className="flex gap-0 max-w-7xl mx-auto">
-          {(['overview'] as const).map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              className={`px-4 py-3 text-sm font-bold border-b-2 transition-colors capitalize ${activeTab === tab ? 'border-mint-dark text-forest' : 'border-transparent text-stone-400 hover:text-stone-600'}`}
-            >{tab === 'overview' ? 'Dashboard' : tab}</button>
-          ))}
-          {currentRole === 'editor' && (
-            <button onClick={() => setActiveTab('manage')}
-              className={`px-4 py-3 text-sm font-bold border-b-2 transition-colors ${activeTab === 'manage' ? 'border-mint-dark text-forest' : 'border-transparent text-stone-400 hover:text-stone-600'}`}
-            >Staff &amp; Zones</button>
+        {/* keyed by page so the content fades in on every switch; the header and nav stay put */}
+        <div key={page} className="animate-page-in motion-reduce:animate-none space-y-5 desk:space-y-6">
+        {/* records when this page was opened, so only what is there on arrival animates */}
+        <PageScope>
+          {page === 'summary' && noZones && <NoZonesNotice />}
+          {page === 'summary' && !noZones && (
+            <SummaryPage
+              bins={myBins}
+              needPickup={needPickup}
+              syncedLabel={syncedLabel}
+              hero={heroBin}
+              statusCounts={statusCounts}
+              campusAvg={campusAvg}
+              onlineCount={onlineBins.length}
+              zones={zoneCounts}
+              topAlerts={topAlerts}
+              alertCount={unreadCount}
+              onShowOnMap={showOnMapFromSummary}
+              onOpenDetail={setSelectedBin}
+              onStatus={status => openDetails({ status })}
+              onZone={zone => openDetails({ zone })}
+              onPickup={openPickupBins}
+              onOpenMap={openMap}
+              onAlert={showOnMapFromSummary}
+              onViewAllAlerts={openAlerts}
+            />
           )}
-        </div>
-      </div>
 
-      {/* main */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+          {page === 'pickup' && <ComingSoon title="Pickup List" icon="listCheck" text="The bins to empty next, in pickup order, will live here." />}
+          {page === 'history' && <ComingSoon title="History" icon="chartLine" text="Past fill levels and pickups for each bin will live here." />}
 
-        {activeTab === 'overview' && (
-          <>
-            {/* spotlight: fullest bin */}
-            <section>
-              <p className="text-[11px] uppercase tracking-widest text-stone-400 font-semibold mb-2">Needs Immediate Attention</p>
-              <div className="relative overflow-hidden rounded-2xl bg-forest text-white px-6 py-5 flex flex-col sm:flex-row items-start sm:items-center gap-5 shadow-xl shadow-forest/20">
-                {/* bg texture */}
-                <div className="absolute inset-0 opacity-5 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at 80% 50%, #798F53 0%, transparent 60%)' }} />
+          {page === 'details' && (
+            <>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setPage('summary')}
+                  aria-label="Back to Summary"
+                  className="inline-flex items-center gap-1.5 bg-white text-pine text-sm font-semibold pl-3 pr-4 min-h-11 rounded-full hover:bg-white/70 transition-colors"
+                >
+                  <Icon name="arrowLeft" size={18} />
+                  Summary
+                </button>
+                <h1 className="text-3xl lg:text-4xl font-semibold text-pine">Details</h1>
+              </div>
+              {/* content: bins + sidebar */}
+              {noZones ? <NoZonesNotice /> : (
+              <div className="flex flex-col lg:flex-row gap-6">
 
-                <div className="flex items-center gap-4">
-                  <div className="relative shrink-0">
-                    <RingGauge fill={maxFill(fullestBin)} size={80} />
-                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <span className="font-mono font-bold text-xl text-rose">{maxFill(fullestBin)}%</span>
-                    </div>
-                  </div>
-                  <div>
-                    <h1 className="font-display text-2xl sm:text-3xl font-bold leading-tight">
-                      {fullestBin.name}
-                    </h1>
-                    <p className="text-white/60 text-sm mt-0.5">{fullestBin.location} · {fullestBin.zone} · {fullestBin.id}</p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {fullestBin.compartments.map(c => (
-                        <span key={c.label} className="text-[11px] font-mono bg-white/10 rounded-md px-2 py-0.5">
-                          {c.label} <span className={c.fill >= CRITICAL_AT ? 'text-rose' : c.fill >= WARN_AT ? 'text-status-warn' : 'text-ivory'}>{c.fill}%</span>
-                        </span>
+                {/* left: bins grid */}
+                <div ref={binsRef} className="flex-1 min-w-0 space-y-4 scroll-mt-4">
+                  {/* filters */}
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <div className="flex items-center bg-white rounded-xl border border-stone-200 p-0.5 text-xs" role="group" aria-label="View">
+                      {(['cards', 'map'] as const).map(mode => (
+                        <button key={mode} onClick={() => { setViewMode(mode); setMapFocus(null) }} aria-pressed={viewMode === mode}
+                          className={`px-3 py-1.5 rounded-[10px] font-medium transition-colors ${viewMode === mode ? 'bg-teal text-ivory' :'text-stone-400 hover:text-stone-600'}`}
+                        >{mode === 'cards' ? 'Cards' : 'Map'}</button>
                       ))}
                     </div>
-                  </div>
-                </div>
 
-                <div className="sm:ml-auto flex flex-col items-start sm:items-end gap-2">
-                  <span className="inline-flex items-center gap-1.5 bg-status-critical text-white text-xs font-semibold px-3 py-1.5 rounded-full">
-                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                    Critical: Collect Now
-                  </span>
-                  <span className="text-white/40 text-xs font-mono">Updated {fullestBin.lastUpdated}</span>
-                  <button
-                    onClick={() => showOnMap(fullestBin.id)}
-                    className="inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-semibold px-3 py-1.5 rounded-full transition-colors"
-                  >
-                    <MapPinIcon size={12} />
-                    Show on Map
-                  </button>
-                </div>
-              </div>
-            </section>
-
-            {/* content: bins + sidebar */}
-            <div className="flex flex-col lg:flex-row gap-6">
-
-              {/* left: bins grid */}
-              <div ref={binsRef} className="flex-1 min-w-0 space-y-4 scroll-mt-20">
-                {/* filters */}
-                <div className="flex flex-wrap gap-2 items-center">
-                  <div className="flex items-center bg-white rounded-xl border border-stone-200 p-0.5 text-xs" role="group" aria-label="View">
-                    {(['cards', 'map'] as const).map(mode => (
-                      <button key={mode} onClick={() => { setViewMode(mode); setMapFocus(null) }} aria-pressed={viewMode === mode}
-                        className={`px-3 py-1.5 rounded-[10px] font-medium transition-colors ${viewMode === mode ? 'bg-teal text-ivory' :'text-stone-400 hover:text-stone-600'}`}
-                      >{mode === 'cards' ? 'Cards' : 'Map'}</button>
-                    ))}
-                  </div>
-
-                  <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-                    <span className="text-stone-400 font-medium mr-1">Zone:</span>
-                    <select value={filterZone} onChange={e => setFilterZone(e.target.value as any)}
-                      className="bg-transparent font-medium text-forest outline-none cursor-pointer pr-1">
-                      <option value="All">All</option>
-                      {ALL_ZONES.map(z => <option key={z} value={z}>{z}</option>)}
-                    </select>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
-                    <span className="text-stone-400 font-medium mr-1">Status:</span>
-                    <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as any)}
-                      className="bg-transparent font-medium text-forest outline-none cursor-pointer pr-1">
-                      <option value="All">All</option>
-                      <option value="critical">Critical</option>
-                      <option value="warn">Warning</option>
-                      <option value="ok">OK</option>
-                      <option value="offline">Offline</option>
-                    </select>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
-                    <span className="text-stone-400 font-medium mr-1">Sort:</span>
-                    <select value={sortBy} onChange={e => setSortBy(e.target.value as any)}
-                      className="bg-transparent font-medium text-forest outline-none cursor-pointer pr-1">
-                      <option value="fill">Fill % (high→low)</option>
-                      <option value="status">Status</option>
-                      <option value="zone">Zone</option>
-                      <option value="name">Name</option>
-                    </select>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
-                    <span className="text-stone-400 font-medium">Alert at</span>
-                    {/* -/+ look the same in every browser (ipad safari has no number arrows); before: pads the tap area */}
-                    <button
-                      onClick={() => setAlertThreshold(t => Math.max(10, t - 5))}
-                      disabled={alertThreshold <= 10}
-                      aria-label="Lower alert threshold"
-                      className="relative w-4 h-4 flex items-center justify-center font-semibold text-stone-400 hover:text-forest disabled:text-stone-200 transition-colors before:absolute before:-inset-x-1.5 before:-inset-y-3.5"
-                    >−</button>
-                    <input
-                      type="number" min={10} max={100} step={5} value={alertThreshold}
-                      onChange={e => setAlertThreshold(Math.min(100, Math.max(10, Number(e.target.value) || 0)))}
-                      aria-label="Alert threshold"
-                      className="w-7 text-center bg-transparent font-medium text-forest outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                    />
-                    <span className="text-stone-400 font-medium">%</span>
-                    <button
-                      onClick={() => setAlertThreshold(t => Math.min(100, t + 5))}
-                      disabled={alertThreshold >= 100}
-                      aria-label="Raise alert threshold"
-                      className="relative w-4 h-4 flex items-center justify-center font-semibold text-stone-400 hover:text-forest disabled:text-stone-200 transition-colors before:absolute before:-inset-x-1.5 before:-inset-y-3.5"
-                    >+</button>
-                  </div>
-
-                  <span className="ml-auto text-xs text-stone-400 font-mono">{filteredBins.length} bin{filteredBins.length !== 1 ? 's' : ''}</span>
-                </div>
-
-                {/* grid or map */}
-                {shownCount === 0 ? (
-                  <div className="py-16 text-center text-stone-400">
-                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-2"><path d="M4 7h16M9 7V4h6v3M10 11v6M14 11v6M6 7l1 13h10l1-13"/></svg>
-                    <p className="text-sm">No bins match these filters.</p>
-                  </div>
-                ) : viewMode === 'map' ? (
-                  <BinMap
-                    bins={mapBins}
-                    fitKey={filteredBins.map(b => b.id).join()}
-                    selectedId={mapBinId}
-                    focus={mapFocus}
-                    onSelect={setMapBinId}
-                    onClosePopup={() => setMapBinId(null)}
-                    onOpenDetail={setSelectedBin}
-                  />
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                    {filteredBins.map(bin => (
-                      <BinCard key={bin.id} bin={bin} onClick={() => setSelectedBin(bin)} onShowOnMap={() => showOnMap(bin.id)} highlighted={bin.id === mapBinId} />
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* right: alerts panel */}
-              <aside className="w-full lg:w-72 xl:w-80 shrink-0 space-y-3">
-                <div ref={alertsRef} className="flex items-center justify-between scroll-mt-20">
-                  <h2 className="text-xs uppercase tracking-widest text-stone-400 font-semibold">Alerts</h2>
-                  {unreadCount > 0 && (
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={clearAllAlerts}
-                        className="relative text-[10px] font-semibold text-stone-400 hover:text-forest transition-colors before:absolute before:-inset-x-2 before:-inset-y-3"
-                      >Clear all</button>
-                      <span className="text-[10px] bg-rose/25 text-pine font-semibold px-2 py-0.5 rounded-full">{unreadCount} active</span>
+                    <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                      <span className="text-stone-400 font-medium mr-1">Zone:</span>
+                      <select value={filterZone} onChange={e => setFilterZone(e.target.value as any)}
+                        className="bg-transparent font-medium text-forest outline-none cursor-pointer pr-1">
+                        <option value="All">All</option>
+                        {visibleZones.map(z => <option key={z} value={z}>{z}</option>)}
+                      </select>
                     </div>
+
+                    <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
+                      <span className="text-stone-400 font-medium mr-1">Status:</span>
+                      <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as any)}
+                        className="bg-transparent font-medium text-forest outline-none cursor-pointer pr-1">
+                        <option value="All">All</option>
+                        <option value="critical">Critical</option>
+                        <option value="warn">Warning</option>
+                        <option value="ok">OK</option>
+                        <option value="offline">Offline</option>
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
+                      <span className="text-stone-400 font-medium mr-1">Sort:</span>
+                      <select value={sortBy} onChange={e => setSortBy(e.target.value as any)}
+                        className="bg-transparent font-medium text-forest outline-none cursor-pointer pr-1">
+                        <option value="fill">Fill % (high→low)</option>
+                        <option value="status">Status</option>
+                        <option value="zone">Zone</option>
+                        <option value="name">Name</option>
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
+                      <span className="text-stone-400 font-medium">Alert at</span>
+                      {/* -/+ look the same in every browser (ipad safari has no number arrows); before: pads the tap area */}
+                      <button
+                        onClick={() => setAlertThreshold(t => Math.max(10, t - 5))}
+                        disabled={alertThreshold <= 10}
+                        aria-label="Lower alert threshold"
+                        className="relative w-4 h-4 flex items-center justify-center font-semibold text-stone-400 hover:text-forest disabled:text-stone-200 transition-colors before:absolute before:-inset-x-1.5 before:-inset-y-3.5"
+                      >−</button>
+                      <input
+                        type="number" min={10} max={100} step={5} value={alertThreshold}
+                        onChange={e => setAlertThreshold(Math.min(100, Math.max(10, Number(e.target.value) || 0)))}
+                        aria-label="Alert threshold"
+                        className="w-7 text-center bg-transparent font-medium text-forest outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                      />
+                      <span className="text-stone-400 font-medium">%</span>
+                      <button
+                        onClick={() => setAlertThreshold(t => Math.min(100, t + 5))}
+                        disabled={alertThreshold >= 100}
+                        aria-label="Raise alert threshold"
+                        className="relative w-4 h-4 flex items-center justify-center font-semibold text-stone-400 hover:text-forest disabled:text-stone-200 transition-colors before:absolute before:-inset-x-1.5 before:-inset-y-3.5"
+                      >+</button>
+                    </div>
+
+                    <span className="ml-auto text-xs text-stone-400 font-mono">{filteredBins.length} bin{filteredBins.length !== 1 ? 's' : ''}</span>
+                  </div>
+
+                  {/* grid or map */}
+                  {shownCount === 0 ? (
+                    <div className="py-16 text-center text-stone-400">
+                      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-2"><path d="M4 7h16M9 7V4h6v3M10 11v6M14 11v6M6 7l1 13h10l1-13"/></svg>
+                      <p className="text-sm">No bins match these filters.</p>
+                    </div>
+                  ) : viewMode === 'map' ? (
+                    <BinMap
+                      bins={mapBins}
+                      fitKey={filteredBins.map(b => b.id).join()}
+                      selectedId={mapBinId}
+                      focus={mapFocus}
+                      onSelect={setMapBinId}
+                      onClosePopup={() => setMapBinId(null)}
+                      onOpenDetail={setSelectedBin}
+                    />
+                  ) : (
+                    <Reveal className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                      {filteredBins.map(bin => (
+                        <BinCard key={bin.id} bin={bin} onClick={() => setSelectedBin(bin)} onShowOnMap={() => showOnMap(bin.id)} highlighted={bin.id === mapBinId} />
+                      ))}
+                    </Reveal>
                   )}
                 </div>
 
-                <div className="space-y-2 max-h-[600px] overflow-y-auto pr-0.5">
-                  {visibleAlerts.length === 0 ? (
-                    <div className="py-10 text-center text-stone-400">
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-1"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>
-                      <p className="text-xs">No active alerts</p>
-                    </div>
-                  ) : visibleAlerts.map(a => (
-                    <AlertItem key={a.id} alert={a} onDismiss={dismissAlert} onSelect={alert => showOnMap(alert.binId)} />
-                  ))}
-                </div>
-
-                {/* summary stats */}
-                <div className="bg-white rounded-2xl border border-stone-200 p-4 mt-4">
-                  <p className="text-[11px] uppercase tracking-widest text-stone-400 font-semibold mb-3">Landfill Activity</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    {[
-                      { label: 'Total Bins', value: TRIBINS.length, color: 'text-forest' },
-                      { label: 'Critical', value: TRIBINS.filter(b => binStatus(b) === 'critical').length, color: 'text-status-critical-ink' },
-                      { label: 'Warning', value: TRIBINS.filter(b => binStatus(b) === 'warn').length, color: 'text-status-warn-ink' },
-                      { label: 'Offline', value: TRIBINS.filter(b => b.sensorStatus === 'offline').length, color: 'text-status-offline-ink' },
-                    ].map(s => (
-                      <div key={s.label} className="text-center py-2 bg-sage rounded-xl">
-                        <p className={`font-mono font-bold text-xl ${s.color}`}>{s.value}</p>
-                        <p className="text-[10px] text-stone-400 mt-0.5">{s.label}</p>
+                {/* right: alerts panel */}
+                <aside className="w-full lg:w-72 xl:w-80 shrink-0 space-y-3">
+                  <div ref={alertsRef} className="flex items-center justify-between scroll-mt-4">
+                    <h2 className="text-xs uppercase tracking-widest text-stone-400 font-semibold">Alerts</h2>
+                    {unreadCount > 0 && (
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={clearAllAlerts}
+                          className="relative text-[10px] font-semibold text-stone-400 hover:text-forest transition-colors before:absolute before:-inset-x-2 before:-inset-y-3"
+                        >Clear all</button>
+                        <span className="text-[10px] bg-rose/25 text-pine font-semibold px-2 py-0.5 rounded-full">{unreadCount} active</span>
                       </div>
+                    )}
+                  </div>
+
+                  <div data-lenis-prevent className="max-h-[600px] overflow-y-auto pr-0.5">
+                    <Reveal className="space-y-2">
+                    {visibleAlerts.length === 0 ? (
+                      <div className="py-10 text-center text-stone-400">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-1"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>
+                        <p className="text-xs">No active alerts</p>
+                      </div>
+                    ) : visibleAlerts.map(a => (
+                      <AlertItem key={a.id} alert={a} onDismiss={dismissAlert} onSelect={alert => showOnMap(alert.binId)} />
                     ))}
+                    </Reveal>
                   </div>
-                  <div className="mt-3 pt-3 border-t border-stone-100">
-                    <div className="flex justify-between text-xs mb-1.5">
-                      <span className="text-stone-400">Landfill activity</span>
-                      <span className="font-mono font-semibold text-forest">
-                        {Math.round(TRIBINS.reduce((s, b) => s + avgFill(b), 0) / TRIBINS.length)}%
-                      </span>
-                    </div>
-                    <div className="h-2 bg-stone-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-olive rounded-full" style={{ width: `${Math.round(TRIBINS.reduce((s, b) => s + avgFill(b), 0) / TRIBINS.length)}%` }} />
-                    </div>
-                  </div>
-                </div>
-              </aside>
-            </div>
-          </>
-        )}
 
-        {/* manage tab */}
-        {activeTab === 'manage' && currentRole === 'editor' && (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="font-display text-2xl text-forest">Staff &amp; Zone Management</h2>
-                <p className="text-sm text-stone-400 mt-0.5">Manage roles and zone assignments for your team.</p>
+                  {/* summary stats */}
+                  <Reveal>
+                  <div className="bg-white rounded-2xl border border-stone-200 p-4 mt-4">
+                    <p className="text-[11px] uppercase tracking-widest text-stone-400 font-semibold mb-3">Landfill Activity</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { label: 'Total Bins', value: myBins.length, color: 'text-forest' },
+                        { label: 'Critical', value: myBins.filter(b => binStatus(b) === 'critical').length, color: 'text-status-critical-ink' },
+                        { label: 'Warning', value: myBins.filter(b => binStatus(b) === 'warn').length, color: 'text-status-warn-ink' },
+                        { label: 'Offline', value: myBins.filter(b => b.sensorStatus === 'offline').length, color: 'text-status-offline-ink' },
+                      ].map(s => (
+                        <div key={s.label} className="text-center py-2 bg-sage rounded-xl">
+                          <p className={`font-mono font-bold text-xl ${s.color}`}>{s.value}</p>
+                          <p className="text-[10px] text-stone-400 mt-0.5">{s.label}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-stone-100">
+                      <div className="flex justify-between text-xs mb-1.5">
+                        <span className="text-stone-400">Landfill activity</span>
+                        <span className="font-mono font-semibold text-forest">
+                          {Math.round(myBins.reduce((s, b) => s + avgFill(b), 0) / Math.max(1, myBins.length))}%
+                        </span>
+                      </div>
+                      <div className="h-2 bg-stone-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-olive rounded-full" style={{ width: `${Math.round(myBins.reduce((s, b) => s + avgFill(b), 0) / Math.max(1, myBins.length))}%` }} />
+                      </div>
+                    </div>
+                  </div>
+                  </Reveal>
+                </aside>
               </div>
-              <span className="text-xs bg-mint/20 text-mint-dark px-3 py-1.5 rounded-full font-semibold">Editors only</span>
-            </div>
+              )}
+            </>
+          )}
 
-            <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-stone-100 bg-sage">
-                    <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Name</th>
-                    <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Email</th>
-                    <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Role</th>
-                    <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold hidden md:table-cell">Zones</th>
-                    <th className="px-5 py-3" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {staffList.map((member, i) => (
-                    <Fragment key={member.id}>
-                      <tr className={`border-b border-stone-50 hover:bg-sage/50 transition-colors ${i === staffList.length - 1 ? 'border-0' : ''}`}>
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-7 h-7 rounded-full bg-mint/20 flex items-center justify-center text-xs font-bold text-mint-dark">
-                              {member.name.split(' ').map(n => n[0]).join('')}
-                            </div>
-                            <span className="font-medium text-forest">{member.name}</span>
-                          </div>
-                        </td>
-                        <td className="px-5 py-3.5 text-stone-400 font-mono text-xs">{member.email}</td>
-                        <td className="px-5 py-3.5">
-                          <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${member.role === 'editor' ? 'bg-mint/20 text-mint-dark' : 'bg-stone-100 text-stone-500'}`}>
-                            {member.role}
-                          </span>
-                        </td>
-                        <td className="px-5 py-3.5 hidden md:table-cell">
-                          <div className="flex flex-wrap gap-1">
-                            {member.zones.map(z => (
-                              <span key={z} className="text-[10px] bg-sage-dark text-stone-600 px-2 py-0.5 rounded-md">{z}</span>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="px-5 py-3.5 text-right">
-                          <button
-                            onClick={() => setEditingStaff(editingStaff === member.id ? null : member.id)}
-                            className="text-xs text-stone-400 hover:text-forest transition-colors font-medium"
-                          >
-                            {editingStaff === member.id ? 'Done' : 'Edit'}
-                          </button>
-                        </td>
-                      </tr>
-                      {editingStaff === member.id && (
-                        <tr key={`${member.id}-edit`} className="bg-sage/40">
-                          <td colSpan={5} className="px-5 py-4">
-                            <div className="space-y-3">
-                              <div className="flex items-center gap-3">
-                                <span className="text-xs font-semibold text-stone-500">Role:</span>
-                                <button
-                                  onClick={() => toggleStaffRole(member.id)}
-                                  className="text-xs px-3 py-1.5 rounded-lg border border-stone-200 bg-white hover:border-mint transition-colors font-medium"
-                                >
-                                  Toggle → {member.role === 'editor' ? 'viewer' : 'editor'}
-                                </button>
+          {/* manage tab */}
+          {page === 'admin' && currentRole === 'editor' && (
+            <div className="space-y-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="font-display text-2xl text-forest">Staff &amp; Zone Management</h2>
+                  <p className="text-sm text-stone-400 mt-0.5">Manage roles and zone assignments for your team.</p>
+                </div>
+                <span className="text-xs bg-mint/20 text-mint-dark px-3 py-1.5 rounded-full font-semibold whitespace-nowrap">Editors only</span>
+              </div>
+
+              {/* phones: one card per person (the table doesn't fit) */}
+              <Reveal className="md:hidden space-y-3">
+                {staffList.map(member => {
+                  const editing = editingStaff === member.id
+                  return (
+                    <div key={member.id} className="bg-white rounded-2xl border border-stone-200 p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-mint/20 flex items-center justify-center text-xs font-bold text-mint-dark shrink-0">
+                          {member.name.split(' ').map(n => n[0]).join('')}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-forest">{member.name}{member.id === currentUserId && <span className="text-stone-400 font-normal"> (you)</span>}</p>
+                          <p className="text-stone-400 font-mono text-xs truncate">{member.email}</p>
+                        </div>
+                        <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${member.role === 'editor' ? 'bg-mint/20 text-mint-dark' : 'bg-stone-100 text-stone-500'}`}>
+                          {member.role}
+                        </span>
+                      </div>
+                      {!editing && (
+                        <div className="flex flex-wrap gap-1 mt-3">
+                          {member.zones.length === 0
+                            ? <span className="text-xs text-stone-400">No zones</span>
+                            : member.zones.map(z => <span key={z} className="text-[10px] bg-sage-dark text-stone-600 px-2 py-0.5 rounded-md">{z}</span>)}
+                        </div>
+                      )}
+                      {editing && (
+                        <div className="mt-4 pt-4 border-t border-stone-100">
+                          <StaffEditor
+                            member={member}
+                            isSelf={member.id === currentUserId}
+                            onToggleRole={() => toggleStaffRole(member.id)}
+                            onToggleZone={zone => toggleZoneAssignment(member.id, zone)}
+                          />
+                        </div>
+                      )}
+                      <button
+                        onClick={() => setEditingStaff(editing ? null : member.id)}
+                        aria-label={`${editing ? 'Done editing' : 'Edit'} ${member.name}`}
+                        className="mt-3 w-full min-h-11 rounded-xl border border-stone-200 text-sm font-semibold text-forest hover:border-mint transition-colors"
+                      >
+                        {editing ? 'Done' : 'Edit'}
+                      </button>
+                    </div>
+                  )
+                })}
+              </Reveal>
+
+              {/* ipad and up: the table */}
+              <Reveal className="hidden md:block">
+              <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-stone-100 bg-sage">
+                      <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Name</th>
+                      <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Email</th>
+                      <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Role</th>
+                      <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Zones</th>
+                      <th className="px-5 py-3" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {staffList.map((member, i) => (
+                      <Fragment key={member.id}>
+                        <tr className={`border-b border-stone-50 hover:bg-sage/50 transition-colors ${i === staffList.length - 1 ? 'border-0' : ''}`}>
+                          <td className="px-5 py-3.5">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-7 h-7 rounded-full bg-mint/20 flex items-center justify-center text-xs font-bold text-mint-dark">
+                                {member.name.split(' ').map(n => n[0]).join('')}
                               </div>
-                              <div>
-                                <p className="text-xs font-semibold text-stone-500 mb-2">Zone assignments:</p>
-                                <div className="flex flex-wrap gap-2">
-                                  {ALL_ZONES.map(zone => (
-                                    <button
-                                      key={zone}
-                                      onClick={() => toggleZoneAssignment(member.id, zone)}
-                                      className={`text-xs px-3 py-1.5 rounded-lg border transition-colors font-medium ${
-                                        member.zones.includes(zone)
-                                          ? 'bg-mint/20 border-mint text-mint-dark'
-                                          : 'bg-white border-stone-200 text-stone-400 hover:border-stone-300'
-                                      }`}
-                                    >
-                                      {zone}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
+                              <span className="font-medium text-forest">{member.name}{member.id === currentUserId && <span className="text-stone-400 font-normal"> (you)</span>}</span>
                             </div>
                           </td>
+                          <td className="px-5 py-3.5 text-stone-400 font-mono text-xs">{member.email}</td>
+                          <td className="px-5 py-3.5">
+                            <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${member.role === 'editor' ? 'bg-mint/20 text-mint-dark' : 'bg-stone-100 text-stone-500'}`}>
+                              {member.role}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <div className="flex flex-wrap gap-1">
+                              {member.zones.map(z => (
+                                <span key={z} className="text-[10px] bg-sage-dark text-stone-600 px-2 py-0.5 rounded-md">{z}</span>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-5 py-1 text-right">
+                            {/* min-h-11: a 44px tap area around the small text */}
+                            <button
+                              onClick={() => setEditingStaff(editingStaff === member.id ? null : member.id)}
+                              aria-label={`${editingStaff === member.id ? 'Done editing' : 'Edit'} ${member.name}`}
+                              className="min-h-11 px-3 -mr-3 text-xs text-stone-400 hover:text-forest transition-colors font-medium"
+                            >
+                              {editingStaff === member.id ? 'Done' : 'Edit'}
+                            </button>
+                          </td>
                         </tr>
-                      )}
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
+                        {editingStaff === member.id && (
+                          <tr key={`${member.id}-edit`} className="bg-sage/40">
+                            <td colSpan={5} className="px-5 py-4">
+                              <StaffEditor
+                                member={member}
+                                isSelf={member.id === currentUserId}
+                                onToggleRole={() => toggleStaffRole(member.id)}
+                                onToggleZone={zone => toggleZoneAssignment(member.id, zone)}
+                              />
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              </Reveal>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* viewers can't open manage */}
-        {activeTab === 'manage' && currentRole !== 'editor' && (
-          <div className="py-24 text-center">
-            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-3"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
-            <p className="text-stone-500 text-sm">Editor access required.</p>
-          </div>
-        )}
+          {/* viewers can't open admin */}
+          {page === 'admin' && currentRole !== 'editor' && (
+            <div className="py-24 text-center">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-3"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+              <p className="text-stone-500 text-sm">Editor access required.</p>
+            </div>
+          )}
+        </PageScope>
+        </div>
       </main>
 
       {/* bin detail modal */}
       {selectedBin && <BinDetailModal bin={selectedBin} onClose={() => setSelectedBin(null)} />}
 
       {/* footer */}
-      <footer className="mt-10 border-t border-stone-200 py-4 px-6 text-center">
+      <footer className="mt-10 border-t border-stone-200 pt-4 pb-28 desk:pb-4 px-6 desk:pl-[calc(76px+1.5rem)] text-center">
         <p className="text-[11px] text-stone-400 font-mono">Bin Monitor · {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
       </footer>
     </div>
