@@ -896,6 +896,7 @@ const ICONS = {
   bell: <><path d="M10 5a2 2 0 1 1 4 0a7 7 0 0 1 4 6v3a4 4 0 0 0 2 3h-16a4 4 0 0 0 2 -3v-3a7 7 0 0 1 4 -6" /><path d="M9 17v1a3 3 0 0 0 6 0v-1" /></>,
   mapPin: <><path d="M9 11a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" /><path d="M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 11.314 0z" /></>,
   layoutGrid: <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></>,
+  circleCheck: <><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" /><path d="M9 12l2 2l4 -4" /></>,
   arrowRight: <><path d="M5 12l14 0" /><path d="M13 18l6 -6" /><path d="M13 6l6 6" /></>,
   arrowLeft: <><path d="M5 12l14 0" /><path d="M5 12l6 6" /><path d="M5 12l6 -6" /></>,
 }
@@ -1080,7 +1081,7 @@ function alertLine(a: Alert) {
 
 function SummaryPage({
   bins, needPickup, syncedLabel, hero, statusCounts, campusAvg, onlineCount, zones, topAlerts, alertCount,
-  onShowOnMap, onOpenDetail, onStatus, onZone, onOpenMap, onAlert, onViewAllAlerts,
+  onShowOnMap, onOpenDetail, onStatus, onZone, onPickup, onOpenMap, onAlert, onViewAllAlerts,
 }: {
   bins: Tribin[] // the signed-in user's bins
   needPickup: number
@@ -1096,6 +1097,7 @@ function SummaryPage({
   onOpenDetail: (bin: Tribin) => void
   onStatus: (status: Status) => void
   onZone: (zone: Zone) => void
+  onPickup: () => void
   onOpenMap: () => void
   onAlert: (binId: string) => void
   onViewAllAlerts: () => void
@@ -1103,9 +1105,7 @@ function SummaryPage({
   return (
     <>
       <div>
-        <h1 className="text-3xl lg:text-4xl font-semibold text-pine leading-tight">
-          {needPickup === 0 ? 'No bins need pickup' : `${needPickup} ${needPickup === 1 ? 'bin needs' : 'bins need'} pickup`}
-        </h1>
+        <h1 className="text-3xl lg:text-4xl font-semibold text-pine leading-tight">At a glance</h1>
         <span className="sm:hidden mt-3 inline-flex items-center bg-white text-teal text-xs font-semibold px-3.5 py-2 rounded-full">{syncedLabel}</span>
       </div>
 
@@ -1187,7 +1187,8 @@ function SummaryPage({
           </button>
         </div>
 
-        {/* one tile per zone: critical count out of its bins */}
+        {/* one tile per zone (critical count out of its bins), then the pickup tile. they pair up
+            two to a row; an odd one out spans the row, so there's never an empty slot */}
         <div className="[grid-area:zones] grid grid-cols-2 gap-3 lg:gap-4">
           {zones.map((z, i) => (
             <button
@@ -1204,6 +1205,29 @@ function SummaryPage({
               <span className={`text-xs mt-1 ${i % 2 ? 'text-teal' : 'text-olive-ink'}`}>critical of {z.total} bins</span>
             </button>
           ))}
+
+          {/* rose = needs attention; olive when nothing does */}
+          <button
+            onClick={onPickup}
+            aria-label={needPickup === 0 ? 'All clear, no bins need pickup. Show all bins' : `${needPickup} ${needPickup === 1 ? 'bin needs' : 'bins need'} pickup. Show bins, fullest first`}
+            className={`${TILE} text-left min-h-[132px] flex flex-col hover:brightness-[0.97] transition ${zones.length % 2 ? '' : 'col-span-2'} ${needPickup === 0 ? 'bg-olive-soft' : 'bg-rose/20'}`}
+          >
+            <span className="flex items-center justify-between w-full text-sm font-semibold text-pine">
+              Needs pickup
+              <Icon name={needPickup === 0 ? 'circleCheck' : 'arrowRight'} size={18} />
+            </span>
+            {needPickup === 0 ? (
+              <>
+                <span className="mt-auto pt-3 text-2xl font-semibold text-pine leading-none">All clear</span>
+                <span className="text-xs mt-1.5 text-olive-ink">No bins need pickup</span>
+              </>
+            ) : (
+              <>
+                <span className="mt-auto pt-3 font-mono text-4xl font-semibold text-pine leading-none">{needPickup}</span>
+                <span className="text-xs mt-1 text-pine">{needPickup === 1 ? 'bin needs' : 'bins need'} pickup</span>
+              </>
+            )}
+          </button>
         </div>
 
         <div className={`[grid-area:alerts] ${TILE} bg-white`}>
@@ -1435,6 +1459,12 @@ export default function App() {
     setPage('details')
   }
 
+  // every bin, fullest first, so the ones needing pickup lead
+  function openPickupBins() {
+    setSortBy('fill')
+    openDetails({})
+  }
+
   // the whole campus, nothing picked
   function openMap() {
     openDetails({})
@@ -1511,6 +1541,7 @@ export default function App() {
             onOpenDetail={setSelectedBin}
             onStatus={status => openDetails({ status })}
             onZone={zone => openDetails({ zone })}
+            onPickup={openPickupBins}
             onOpenMap={openMap}
             onAlert={showOnMapFromSummary}
             onViewAllAlerts={openAlerts}
