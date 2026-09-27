@@ -212,12 +212,15 @@ function pinHex(bin: Tribin) {
 // which bin colors a group bubble
 const PIN_RANK: Record<Status, number> = { critical: 0, warn: 1, offline: 2, ok: 3 }
 
+// thin dark edge + drop shadow so pins lift off the muted map
+const PIN_SHADOW = '0 0 0 1px rgb(0 0 0 / .18), 0 2px 5px rgb(0 0 0 / .4)'
+
 function binIcon(bin: Tribin, labeled: boolean, selected: boolean) {
   const hex = pinHex(bin)
   const ring = selected ? `, 0 0 0 3px ${MINT_HEX}` : ''
   const body = labeled
-    ? `<span class="flex items-center gap-1 bg-white rounded-full pl-1.5 pr-2 py-0.5 font-mono text-[11px] leading-none font-bold text-forest ${selected ? 'scale-110' : ''}" style="border:2px solid ${hex};box-shadow:0 1px 3px rgb(0 0 0 / .3)${ring}"><span class="w-2 h-2 rounded-full" style="background:${hex}"></span>${maxFill(bin)}%</span>`
-    : `<span class="block rounded-full border-2 border-white ${selected ? 'w-5 h-5' : 'w-3.5 h-3.5'}" style="background:${hex};box-shadow:0 1px 3px rgb(0 0 0 / .35)${ring}"></span>`
+    ? `<span class="flex items-center gap-1 bg-white rounded-full pl-1.5 pr-2 py-0.5 font-mono text-[11px] leading-none font-bold text-forest ${selected ? 'scale-110' : ''}" style="border:2px solid ${hex};box-shadow:${PIN_SHADOW}${ring}"><span class="w-2 h-2 rounded-full" style="background:${hex}"></span>${maxFill(bin)}%</span>`
+    : `<span class="block rounded-full border-[2.5px] border-white ${selected ? 'w-5 h-5' : 'w-4 h-4'}" style="background:${hex};box-shadow:${PIN_SHADOW}${ring}"></span>`
   const w = labeled ? 56 : PIN_TAP
   return divIcon({
     className: '',
@@ -233,7 +236,7 @@ function groupIcon(bins: Tribin[]) {
     className: '',
     iconSize: [PIN_TAP, PIN_TAP],
     iconAnchor: [PIN_TAP / 2, PIN_TAP / 2],
-    html: `<div class="w-full h-full flex items-center justify-center"><span class="flex items-center justify-center w-7 h-7 rounded-full bg-white font-mono text-[11px] font-bold text-forest" style="border:3px solid ${pinHex(worst)};box-shadow:0 1px 3px rgb(0 0 0 / .3)">${bins.length}</span></div>`,
+    html: `<div class="w-full h-full flex items-center justify-center"><span class="flex items-center justify-center w-7 h-7 rounded-full bg-white font-mono text-[11px] font-bold text-forest" style="border:3px solid ${pinHex(worst)};box-shadow:${PIN_SHADOW}">${bins.length}</span></div>`,
   })
 }
 
@@ -502,14 +505,13 @@ interface BinMapProps {
   bins: Tribin[]
   fitKey: string
   selectedId: string | null
-  popupId: string | null
   focus: MapFocus | null
   onSelect: (id: string) => void
   onClosePopup: () => void
   onOpenDetail: (bin: Tribin) => void
 }
 
-function BinMapLayers({ bins, fitKey, selectedId, popupId, focus, onSelect, onClosePopup, onOpenDetail }: BinMapProps) {
+function BinMapLayers({ bins, fitKey, selectedId, focus, onSelect, onClosePopup, onOpenDetail }: BinMapProps) {
   const map = useMap()
   const [zoom, setZoom] = useState(() => map.getZoom())
   useMapEvents({
@@ -517,7 +519,7 @@ function BinMapLayers({ bins, fitKey, selectedId, popupId, focus, onSelect, onCl
     // tapping empty map closes the card, marker taps don't reach here
     click: onClosePopup,
   })
-  const popupBin = bins.find(b => b.id === popupId)
+  const popupBin = bins.find(b => b.id === selectedId)
 
   // refit when the filters change, not on first render
   const lastFitKey = useRef(fitKey)
@@ -651,10 +653,12 @@ function BinMap(props: BinMapProps) {
           url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
           maxZoom={MAX_ZOOM}
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          // mute only the base map so the status colors of the pins stand out
+          className="[filter:grayscale(.85)_brightness(1.05)_contrast(.9)]"
         />
         <BinMapLayers {...props} />
       </MapContainer>
-      <MapLegend hidden={bins.some(b => b.id === props.popupId)} />
+      <MapLegend hidden={bins.some(b => b.id === props.selectedId)} />
     </div>
   )
 }
@@ -673,10 +677,8 @@ export default function App() {
   const [editingStaff, setEditingStaff] = useState<string | null>(null)
   const [staffList, setStaffList] = useState<StaffMember[]>(STAFF)
   const [viewMode, setViewMode] = useState<'cards' | 'map'>('cards')
-  // bin picked on the map, stays highlighted in cards view
+  // bin whose card is open on the map, highlighted in cards view until the card is closed
   const [mapBinId, setMapBinId] = useState<string | null>(null)
-  // bin whose card is popped up on the map; closing it keeps mapBinId
-  const [popupBinId, setPopupBinId] = useState<string | null>(null)
   const [mapFocus, setMapFocus] = useState<MapFocus | null>(null)
   const [scrollReq, setScrollReq] = useState<{ target: 'bins' | 'alerts'; n: number } | null>(null)
   const binsRef = useRef<HTMLDivElement>(null)
@@ -762,19 +764,8 @@ export default function App() {
   function showOnMap(binId: string) {
     setViewMode('map')
     setMapBinId(binId)
-    setPopupBinId(binId)
     setMapFocus(prev => ({ id: binId, n: (prev?.n ?? 0) + 1 }))
     requestScroll('bins')
-  }
-
-  function selectPin(binId: string) {
-    setMapBinId(binId)
-    setPopupBinId(binId)
-  }
-
-  function clearMapBin() {
-    setMapBinId(null)
-    setPopupBinId(null)
   }
 
   function dismissAlert(id: string) {
@@ -980,10 +971,9 @@ export default function App() {
                     bins={mapBins}
                     fitKey={filteredBins.map(b => b.id).join()}
                     selectedId={mapBinId}
-                    popupId={popupBinId}
                     focus={mapFocus}
-                    onSelect={selectPin}
-                    onClosePopup={() => setPopupBinId(null)}
+                    onSelect={setMapBinId}
+                    onClosePopup={() => setMapBinId(null)}
                     onOpenDetail={setSelectedBin}
                   />
                 ) : (
@@ -995,23 +985,8 @@ export default function App() {
                 )}
               </div>
 
-              {/* right: selected bin + alerts panel */}
+              {/* right: alerts panel */}
               <aside className="w-full lg:w-72 xl:w-80 shrink-0 space-y-3">
-                {mapBin && (
-                  <section className="space-y-3 pb-3">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-xs uppercase tracking-widest text-stone-400 font-semibold">Selected Bin</h2>
-                      <button
-                        onClick={clearMapBin}
-                        className="text-stone-300 hover:text-stone-500 text-xs transition-colors"
-                        title="Clear selection"
-                        aria-label="Clear selected bin"
-                      >✕</button>
-                    </div>
-                    <BinCard bin={mapBin} onClick={() => setSelectedBin(mapBin)} onShowOnMap={() => showOnMap(mapBin.id)} />
-                  </section>
-                )}
-
                 <div ref={alertsRef} className="flex items-center justify-between scroll-mt-20">
                   <h2 className="text-xs uppercase tracking-widest text-stone-400 font-semibold">Alerts</h2>
                   {unreadCount > 0 && (
