@@ -1130,7 +1130,7 @@ function SummaryPage({
       {/* bento: 2 columns on phone and ipad portrait, 4 from 1024px. the pickup tile lists
           every zone as a row, so more zones grow it instead of adding tiles */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4
-        [grid-template-areas:'hero_hero'_'status_status'_'gauge_map'_'pickup_pickup'_'alerts_alerts']
+        [grid-template-areas:'hero_hero'_'status_status'_'pickup_pickup'_'gauge_map'_'alerts_alerts']
         md:[grid-template-areas:'hero_hero'_'status_status'_'pickup_pickup'_'map_map'_'gauge_alerts']
         lg:[grid-template-areas:'hero_hero_gauge_status'_'map_map_pickup_pickup'_'map_map_alerts_alerts']">
 
@@ -1165,19 +1165,20 @@ function SummaryPage({
           </div>
         )}
 
-        {/* status counts, each opens details filtered to it */}
-        <div className={`[grid-area:status] ${TILE} bg-white`}>
+        {/* status counts as four equal mini-tiles (2x2, or 4 across when the tile is full width on
+            ipad portrait); on desktop they stretch to the tile's height. each opens details for it */}
+        <div className={`[grid-area:status] ${TILE} bg-white flex flex-col`}>
           <p className="text-xs font-semibold text-pine mb-3">Status</p>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex-1 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-2 auto-rows-fr gap-2">
             {STATUS_PILLS.map(s => (
               <button
                 key={s.status}
                 onClick={() => onStatus(s.status)}
                 aria-label={`${statusCounts[s.status]} ${statusLabel(s.status)}. Show these bins`}
-                className={`inline-flex items-baseline gap-2 min-h-11 px-4 py-2 rounded-full ${s.cls} hover:brightness-95 transition`}
+                className={`flex flex-col justify-center gap-1 min-h-11 px-3.5 lg:px-3 py-2.5 rounded-2xl text-left ${s.cls} hover:brightness-95 transition`}
               >
                 <span className="text-xs font-semibold">{statusLabel(s.status)}</span>
-                <span className="font-mono text-lg font-bold leading-none">{statusCounts[s.status]}</span>
+                <span className="font-mono text-2xl font-bold leading-none">{statusCounts[s.status]}</span>
               </button>
             ))}
           </div>
