@@ -1,10 +1,23 @@
-import { useState, useMemo, Fragment } from 'react'
+import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
+import type { KeyboardEvent } from 'react'
+import { divIcon, latLngBounds } from 'leaflet'
+import type { LatLngTuple, Point } from 'leaflet'
+import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet'
+import 'leaflet/dist/leaflet.css'
 import logoUrl from './imports/logo.png'
 import { mockBins } from './data/mockBins'
 
 // fill bands: green 0-49, yellow 50-79, red 80-100
 const WARN_AT = 50
 const CRITICAL_AT = 80
+
+// map: dots when zoomed out, labeled pins from street level in
+const LABEL_ZOOM = 18
+const MAX_ZOOM = 19
+// apple's minimum tap size, every pin gets at least this much hit area
+const PIN_TAP = 44
+const OFFLINE_HEX = '#a8a29e'
+const MINT_HEX = '#52b788'
 
 // types
 
@@ -178,6 +191,70 @@ function compartmentColor(label: Stream) {
   return { Landfill: '#4b5563', Recycling: '#2563eb', Compost: '#16a34a' }[label]
 }
 
+// enter/space on a div acting as a button
+function onActivate(fn: () => void) {
+  return (e: KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      fn()
+    }
+  }
+}
+
+// map pin helpers
+
+// same colors as the card gauges, gray when offline
+function pinHex(bin: Tribin) {
+  return bin.sensorStatus === 'offline' ? OFFLINE_HEX : fillHex(maxFill(bin))
+}
+
+// which bin colors a group bubble
+const PIN_RANK: Record<Status, number> = { critical: 0, warn: 1, offline: 2, ok: 3 }
+
+function binIcon(bin: Tribin, labeled: boolean, selected: boolean) {
+  const hex = pinHex(bin)
+  const ring = selected ? `, 0 0 0 3px ${MINT_HEX}` : ''
+  const body = labeled
+    ? `<span class="flex items-center gap-1 bg-white rounded-full pl-1.5 pr-2 py-0.5 font-mono text-[11px] leading-none font-bold text-forest ${selected ? 'scale-110' : ''}" style="border:2px solid ${hex};box-shadow:0 1px 3px rgb(0 0 0 / .3)${ring}"><span class="w-2 h-2 rounded-full" style="background:${hex}"></span>${maxFill(bin)}%</span>`
+    : `<span class="block rounded-full border-2 border-white ${selected ? 'w-5 h-5' : 'w-3.5 h-3.5'}" style="background:${hex};box-shadow:0 1px 3px rgb(0 0 0 / .35)${ring}"></span>`
+  const w = labeled ? 56 : PIN_TAP
+  return divIcon({
+    className: '',
+    iconSize: [w, PIN_TAP],
+    iconAnchor: [w / 2, PIN_TAP / 2],
+    html: `<div class="w-full h-full flex items-center justify-center">${body}</div>`,
+  })
+}
+
+function groupIcon(bins: Tribin[]) {
+  const worst = [...bins].sort((a, b) => PIN_RANK[binStatus(a)] - PIN_RANK[binStatus(b)])[0]
+  return divIcon({
+    className: '',
+    iconSize: [PIN_TAP, PIN_TAP],
+    iconAnchor: [PIN_TAP / 2, PIN_TAP / 2],
+    html: `<div class="w-full h-full flex items-center justify-center"><span class="flex items-center justify-center w-7 h-7 rounded-full bg-white font-mono text-[11px] font-bold text-forest" style="border:3px solid ${pinHex(worst)};box-shadow:0 1px 3px rgb(0 0 0 / .3)">${bins.length}</span></div>`,
+  })
+}
+
+function binLatLng(bin: Tribin): LatLngTuple {
+  return [bin.lat, bin.lng]
+}
+
+// pins closer than minGap px on screen share one bubble, the picked bin always stands alone
+function groupPins(bins: Tribin[], selectedId: string | null, toPoint: (bin: Tribin) => Point, minGap: number) {
+  const groups: { at: Point; bins: Tribin[] }[] = []
+  for (const bin of bins) {
+    const at = toPoint(bin)
+    const near = bin.id === selectedId
+      ? undefined
+      : groups.find(g => g.bins[0].id !== selectedId && g.at.distanceTo(at) < minGap)
+    if (near) near.bins.push(bin)
+    else groups.push({ at, bins: [bin] })
+  }
+  return groups.map(g => g.bins)
+}
+
 // sub-components
 
 function RingGauge({ fill, size = 56 }: { fill: number; size?: number }) {
@@ -229,12 +306,29 @@ function CompartmentBar({ label, fill }: { label: Stream; fill: number }) {
   )
 }
 
-function BinCard({ bin, onClick }: { bin: Tribin; onClick: () => void }) {
+function MapPinIcon({ size }: { size: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+      <path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>
+    </svg>
+  )
+}
+
+// div instead of button so the map button can sit inside it
+function BinCard({ bin, onClick, onShowOnMap, highlighted = false }: {
+  bin: Tribin
+  onClick: () => void
+  onShowOnMap: () => void
+  highlighted?: boolean
+}) {
   const top = maxFill(bin)
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
-      className="group text-left bg-white rounded-2xl border border-stone-200/80 p-4 hover:border-emerald-300 hover:shadow-lg hover:shadow-emerald-900/5 transition-all duration-200 cursor-pointer"
+      onKeyDown={onActivate(onClick)}
+      className={`group text-left bg-white rounded-2xl border p-4 hover:border-emerald-300 hover:shadow-lg hover:shadow-emerald-900/5 transition-all duration-200 cursor-pointer ${highlighted ? 'border-mint ring-2 ring-mint/30' : 'border-stone-200/80'}`}
     >
       <div className="flex items-start justify-between mb-3">
         <div>
@@ -267,17 +361,35 @@ function BinCard({ bin, onClick }: { bin: Tribin; onClick: () => void }) {
 
       <div className="flex items-center justify-between pt-2 border-t border-stone-100">
         <BatteryIcon level={bin.battery} />
-        <span className="text-[10px] text-stone-400 font-mono">{bin.lastUpdated}</span>
+        <div className="flex items-center gap-2">
+          {/* before: pads the tap area without changing the look */}
+          <button
+            onClick={e => { e.stopPropagation(); onShowOnMap() }}
+            className="relative inline-flex items-center gap-1 text-[10px] leading-none font-semibold text-mint-dark bg-mint/10 hover:bg-mint/20 rounded-full px-2 py-0.5 transition-colors before:absolute before:-inset-x-2 before:-inset-y-3"
+            aria-label={`Show ${bin.name} on map`}
+          >
+            <MapPinIcon size={9} />
+            Map
+          </button>
+          <span className="text-[10px] text-stone-400 font-mono">{bin.lastUpdated}</span>
+        </div>
       </div>
-    </button>
+    </div>
   )
 }
 
-function AlertItem({ alert, onDismiss }: { alert: Alert; onDismiss: (id: string) => void }) {
+function AlertItem({ alert, onDismiss, onSelect }: { alert: Alert; onDismiss: (id: string) => void; onSelect: (alert: Alert) => void }) {
   const dot = { critical: 'bg-red-500', warn: 'bg-amber-400', info: 'bg-blue-400' }[alert.severity]
   const bg = { critical: 'border-l-red-500 bg-red-50', warn: 'border-l-amber-400 bg-amber-50', info: 'border-l-blue-400 bg-blue-50' }[alert.severity]
   return (
-    <div className={`flex gap-3 p-3 border-l-2 rounded-r-lg ${bg}`}>
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect(alert)}
+      onKeyDown={onActivate(() => onSelect(alert))}
+      className={`flex gap-3 p-3 border-l-2 rounded-r-lg cursor-pointer hover:shadow-md hover:shadow-forest/5 transition-shadow ${bg}`}
+      title="Show on map"
+    >
       <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${dot}`} />
       <div className="flex-1 min-w-0">
         <p className="text-xs font-semibold text-forest">{alert.binName} · {alert.zone}</p>
@@ -285,9 +397,10 @@ function AlertItem({ alert, onDismiss }: { alert: Alert; onDismiss: (id: string)
         <p className="text-[10px] text-stone-400 font-mono mt-1">{alert.time}</p>
       </div>
       <button
-        onClick={() => onDismiss(alert.id)}
+        onClick={e => { e.stopPropagation(); onDismiss(alert.id) }}
         className="text-stone-300 hover:text-stone-500 shrink-0 text-xs transition-colors"
         title="Dismiss"
+        aria-label="Dismiss alert"
       >✕</button>
     </div>
   )
@@ -296,6 +409,13 @@ function AlertItem({ alert, onDismiss }: { alert: Alert; onDismiss: (id: string)
 // modal: bin detail
 
 function BinDetailModal({ bin, onClose }: { bin: Tribin; onClose: () => void }) {
+  // esc closes
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-forest/40 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6" onClick={e => e.stopPropagation()}>
@@ -305,7 +425,7 @@ function BinDetailModal({ bin, onClose }: { bin: Tribin; onClose: () => void }) 
             <p className="text-sm text-stone-400">{bin.zone}</p>
             <p className="text-[11px] text-stone-400 font-mono mt-0.5">{bin.id}</p>
           </div>
-          <button onClick={onClose} className="text-stone-300 hover:text-stone-600 transition-colors text-lg">✕</button>
+          <button onClick={onClose} aria-label="Close" className="text-stone-300 hover:text-stone-600 transition-colors text-lg">✕</button>
         </div>
 
         <div className="flex justify-center mb-5">
@@ -358,6 +478,136 @@ function BinDetailModal({ bin, onClose }: { bin: Tribin; onClose: () => void }) 
   )
 }
 
+// map view
+
+interface MapFocus {
+  id: string
+  n: number // bumps so jumping to the same bin twice still flies there
+}
+
+function BinMapLayers({ bins, fitKey, selectedId, focus, onSelect }: {
+  bins: Tribin[]
+  fitKey: string
+  selectedId: string | null
+  focus: MapFocus | null
+  onSelect: (id: string) => void
+}) {
+  const map = useMap()
+  const [zoom, setZoom] = useState(() => map.getZoom())
+  useMapEvents({ zoomend: () => setZoom(map.getZoom()) })
+
+  // refit when the filters change, not on first render
+  const lastFitKey = useRef(fitKey)
+  useEffect(() => {
+    if (lastFitKey.current === fitKey) return
+    lastFitKey.current = fitKey
+    map.flyToBounds(latLngBounds(bins.map(binLatLng)), { padding: [40, 40], maxZoom: LABEL_ZOOM, duration: 0.6 })
+  }, [fitKey, bins, map])
+
+  // fly to a bin jumped to from a card, alert or the spotlight
+  const lastFocus = useRef(focus?.n)
+  useEffect(() => {
+    if (!focus || focus.n === lastFocus.current) return
+    lastFocus.current = focus.n
+    const bin = bins.find(b => b.id === focus.id)
+    if (bin) map.flyTo(binLatLng(bin), Math.max(map.getZoom(), LABEL_ZOOM), { duration: 0.6 })
+  }, [focus, bins, map])
+
+  const labeled = zoom >= LABEL_ZOOM
+  const groups = useMemo(
+    () => groupPins(bins, selectedId, b => map.project(binLatLng(b), zoom), labeled ? 50 : PIN_TAP),
+    [bins, selectedId, zoom, labeled, map],
+  )
+
+  return (
+    <>
+      {groups.map(group => {
+        if (group.length === 1) {
+          const bin = group[0]
+          const selected = bin.id === selectedId
+          return (
+            <Marker
+              key={bin.id}
+              position={binLatLng(bin)}
+              icon={binIcon(bin, labeled, selected)}
+              title={`${bin.name} · ${maxFill(bin)}%`}
+              zIndexOffset={selected ? 1000 : 0}
+              riseOnHover
+              eventHandlers={{ click: () => onSelect(bin.id) }}
+            />
+          )
+        }
+        const bounds = latLngBounds(group.map(binLatLng))
+        return (
+          <Marker
+            key={group.map(b => b.id).join()}
+            position={bounds.getCenter()}
+            icon={groupIcon(group)}
+            title={`${group.map(b => b.name).join(', ')}: tap to zoom in`}
+            riseOnHover
+            eventHandlers={{ click: () => map.flyToBounds(bounds, { padding: [60, 60], maxZoom: MAX_ZOOM, duration: 0.6 }) }}
+          />
+        )
+      })}
+    </>
+  )
+}
+
+function MapLegend() {
+  const items: { label: string; hex: string }[] = [
+    { label: statusLabel('ok'), hex: fillHex(0) },
+    { label: statusLabel('warn'), hex: fillHex(WARN_AT) },
+    { label: statusLabel('critical'), hex: fillHex(CRITICAL_AT) },
+    { label: statusLabel('offline'), hex: OFFLINE_HEX },
+  ]
+  return (
+    // top right: bottom corners hold the osm attribution, top left the zoom buttons
+    <div className="absolute right-2 top-2 z-[1000] max-w-[calc(100%-4rem)] pointer-events-none bg-white/95 rounded-xl border border-stone-200 px-2.5 py-1.5 flex flex-wrap justify-end items-center gap-x-3 gap-y-1 text-[10px] font-medium text-stone-500">
+      {items.map(i => (
+        <span key={i.label} className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: i.hex }} />
+          {i.label}
+        </span>
+      ))}
+      <span className="flex items-center gap-1.5">
+        <span className="w-3.5 h-3.5 rounded-full border-2 border-stone-400 font-mono text-[8px] font-bold text-forest flex items-center justify-center">2</span>
+        Grouped
+      </span>
+    </div>
+  )
+}
+
+function BinMap({ bins, fitKey, selectedId, focus, onSelect }: {
+  bins: Tribin[]
+  fitKey: string
+  selectedId: string | null
+  focus: MapFocus | null
+  onSelect: (id: string) => void
+}) {
+  // starting view: the bin being jumped to, otherwise fit every pin
+  const [initial] = useState(() => {
+    const bin = focus && bins.find(b => b.id === focus.id)
+    return bin
+      ? { center: binLatLng(bin), zoom: LABEL_ZOOM }
+      : { bounds: latLngBounds(bins.map(binLatLng)), boundsOptions: { padding: [40, 40] as [number, number], maxZoom: LABEL_ZOOM } }
+  })
+
+  return (
+    // isolate keeps leaflet's z-indexes (up to 1000) below the sticky nav and the detail popup
+    <div className="relative isolate h-[60vh] min-h-[320px] max-h-[640px] bg-white rounded-2xl border border-stone-200/80 overflow-hidden">
+      <MapContainer {...initial} maxZoom={MAX_ZOOM} className="h-full w-full">
+        <TileLayer
+          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+          maxZoom={MAX_ZOOM}
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        />
+        <BinMapLayers bins={bins} fitKey={fitKey} selectedId={selectedId} focus={focus} onSelect={onSelect} />
+      </MapContainer>
+      <MapLegend />
+    </div>
+  )
+}
+
 // main app
 
 export default function App() {
@@ -371,6 +621,27 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'overview' | 'manage'>('overview')
   const [editingStaff, setEditingStaff] = useState<string | null>(null)
   const [staffList, setStaffList] = useState<StaffMember[]>(STAFF)
+  const [viewMode, setViewMode] = useState<'cards' | 'map'>('cards')
+  // bin picked on the map, stays highlighted in cards view
+  const [mapBinId, setMapBinId] = useState<string | null>(null)
+  const [mapFocus, setMapFocus] = useState<MapFocus | null>(null)
+  const [scrollReq, setScrollReq] = useState<{ target: 'bins' | 'alerts' | 'selected'; n: number } | null>(null)
+  const binsRef = useRef<HTMLDivElement>(null)
+  const alertsRef = useRef<HTMLDivElement>(null)
+  const selectedRef = useRef<HTMLElement>(null)
+
+  // scroll after render, and only when the target isn't already on screen
+  useEffect(() => {
+    if (!scrollReq) return
+    const el = { bins: binsRef, alerts: alertsRef, selected: selectedRef }[scrollReq.target].current
+    if (!el) return
+    const { top } = el.getBoundingClientRect()
+    if (top < 56 || top > window.innerHeight - 120) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [scrollReq])
+
+  function requestScroll(target: 'bins' | 'alerts' | 'selected') {
+    setScrollReq(prev => ({ target, n: (prev?.n ?? 0) + 1 }))
+  }
 
   // alerts rebuild when the threshold changes
   const alerts = useMemo<Alert[]>(() => {
@@ -427,6 +698,28 @@ export default function App() {
     return bins
   }, [filterZone, filterStatus, sortBy])
 
+  const mapBin = TRIBINS.find(b => b.id === mapBinId) ?? null
+
+  // the picked bin keeps its pin even when the filters hide it
+  const mapBins = useMemo(
+    () => (mapBin && !filteredBins.includes(mapBin) ? [...filteredBins, mapBin] : filteredBins),
+    [filteredBins, mapBin],
+  )
+  const shownCount = viewMode === 'map' ? mapBins.length : filteredBins.length
+
+  function showOnMap(binId: string) {
+    setViewMode('map')
+    setMapBinId(binId)
+    setMapFocus(prev => ({ id: binId, n: (prev?.n ?? 0) + 1 }))
+    requestScroll('bins')
+  }
+
+  function selectPin(binId: string) {
+    setMapBinId(binId)
+    // below lg the selected card sits under the map
+    if (window.matchMedia('(max-width: 1023px)').matches) requestScroll('selected')
+  }
+
   function dismissAlert(id: string) {
     setDismissedIds(prev => (prev.includes(id) ? prev : [...prev, id]))
   }
@@ -469,7 +762,7 @@ export default function App() {
           </div>
 
           {/* alert bell */}
-          <button className="relative p-2 rounded-lg hover:bg-white/10 transition-colors" onClick={() => setActiveTab('overview')}>
+          <button className="relative p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="Alerts" onClick={() => { setActiveTab('overview'); requestScroll('alerts') }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0" />
             </svg>
@@ -543,6 +836,13 @@ export default function App() {
                     Critical: Collect Now
                   </span>
                   <span className="text-white/40 text-xs font-mono">Updated {fullestBin.lastUpdated}</span>
+                  <button
+                    onClick={() => showOnMap(fullestBin.id)}
+                    className="inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-semibold px-3 py-1.5 rounded-full transition-colors"
+                  >
+                    <MapPinIcon size={12} />
+                    Show on Map
+                  </button>
                 </div>
               </div>
             </section>
@@ -551,9 +851,17 @@ export default function App() {
             <div className="flex flex-col lg:flex-row gap-6">
 
               {/* left: bins grid */}
-              <div className="flex-1 min-w-0 space-y-4">
+              <div ref={binsRef} className="flex-1 min-w-0 space-y-4 scroll-mt-20">
                 {/* filters */}
                 <div className="flex flex-wrap gap-2 items-center">
+                  <div className="flex items-center bg-white rounded-xl border border-stone-200 p-0.5 text-xs" role="group" aria-label="View">
+                    {(['cards', 'map'] as const).map(mode => (
+                      <button key={mode} onClick={() => { setViewMode(mode); setMapFocus(null) }} aria-pressed={viewMode === mode}
+                        className={`px-3 py-1.5 rounded-[10px] font-medium transition-colors ${viewMode === mode ? 'bg-sage-dark text-forest' : 'text-stone-400 hover:text-stone-600'}`}
+                      >{mode === 'cards' ? 'Cards' : 'Map'}</button>
+                    ))}
+                  </div>
+
                   <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
                     <span className="text-stone-400 font-medium mr-1">Zone:</span>
@@ -600,24 +908,47 @@ export default function App() {
                   <span className="ml-auto text-xs text-stone-400 font-mono">{filteredBins.length} bin{filteredBins.length !== 1 ? 's' : ''}</span>
                 </div>
 
-                {/* grid */}
-                {filteredBins.length === 0 ? (
+                {/* grid or map */}
+                {shownCount === 0 ? (
                   <div className="py-16 text-center text-stone-400">
                     <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-2"><path d="M4 7h16M9 7V4h6v3M10 11v6M14 11v6M6 7l1 13h10l1-13"/></svg>
                     <p className="text-sm">No bins match these filters.</p>
                   </div>
+                ) : viewMode === 'map' ? (
+                  <BinMap
+                    bins={mapBins}
+                    fitKey={filteredBins.map(b => b.id).join()}
+                    selectedId={mapBinId}
+                    focus={mapFocus}
+                    onSelect={selectPin}
+                  />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                     {filteredBins.map(bin => (
-                      <BinCard key={bin.id} bin={bin} onClick={() => setSelectedBin(bin)} />
+                      <BinCard key={bin.id} bin={bin} onClick={() => setSelectedBin(bin)} onShowOnMap={() => showOnMap(bin.id)} highlighted={bin.id === mapBinId} />
                     ))}
                   </div>
                 )}
               </div>
 
-              {/* right: alerts panel */}
+              {/* right: selected bin + alerts panel */}
               <aside className="w-full lg:w-72 xl:w-80 shrink-0 space-y-3">
-                <div className="flex items-center justify-between">
+                {mapBin && (
+                  <section ref={selectedRef} className="space-y-3 pb-3 scroll-mt-20">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-xs uppercase tracking-widest text-stone-400 font-semibold">Selected Bin</h2>
+                      <button
+                        onClick={() => setMapBinId(null)}
+                        className="text-stone-300 hover:text-stone-500 text-xs transition-colors"
+                        title="Clear selection"
+                        aria-label="Clear selected bin"
+                      >✕</button>
+                    </div>
+                    <BinCard bin={mapBin} onClick={() => setSelectedBin(mapBin)} onShowOnMap={() => showOnMap(mapBin.id)} />
+                  </section>
+                )}
+
+                <div ref={alertsRef} className="flex items-center justify-between scroll-mt-20">
                   <h2 className="text-xs uppercase tracking-widest text-stone-400 font-semibold">Alerts</h2>
                   {unreadCount > 0 && (
                     <span className="text-[10px] bg-red-100 text-red-700 font-semibold px-2 py-0.5 rounded-full">{unreadCount} active</span>
@@ -631,7 +962,7 @@ export default function App() {
                       <p className="text-xs">No active alerts</p>
                     </div>
                   ) : visibleAlerts.map(a => (
-                    <AlertItem key={a.id} alert={a} onDismiss={dismissAlert} />
+                    <AlertItem key={a.id} alert={a} onDismiss={dismissAlert} onSelect={alert => showOnMap(alert.binId)} />
                   ))}
                 </div>
 
