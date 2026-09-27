@@ -144,6 +144,16 @@ const STAFF: StaffMember[] = [
 // one zone per building, so staff can filter by location
 const TRIBINS: Tribin[] = mockBins as Tribin[]
 
+// demo only: the same bins as if just emptied (a third of each fill, sensors back online),
+// shown to person 3 so the "all clear" look can be previewed. the header flags it as sample data
+const SAMPLE_USER_ID = 's3'
+const SAMPLE_CLEAR_BINS: Tribin[] = TRIBINS.map(b => ({
+  ...b,
+  compartments: b.compartments.map(c => ({ ...c, fill: Math.round(c.fill / 3) })),
+  sensorStatus: 'online',
+  lastUpdated: b.sensorStatus === 'offline' ? '1 min ago' : b.lastUpdated,
+}))
+
 const ALL_ZONES: Zone[] = [
     ...new Set(TRIBINS.map(bin => bin.zone))
 ]
@@ -949,12 +959,13 @@ function NavRail({ page, role, onNavigate }: { page: Page; role: Role; onNavigat
 }
 
 // avatar + greeting (tap to switch the demo user), synced pill, alert bell
-function TopBar({ userName, role, greeting, syncedLabel, alertCount, onSwitchUser, onBell }: {
+function TopBar({ userName, role, greeting, syncedLabel, alertCount, sampleData, onSwitchUser, onBell }: {
   userName: string
   role: Role
   greeting: string
   syncedLabel: string
   alertCount: number
+  sampleData: boolean
   onSwitchUser: () => void
   onBell: () => void
 }) {
@@ -976,17 +987,22 @@ function TopBar({ userName, role, greeting, syncedLabel, alertCount, onSwitchUse
           </span>
         </span>
       </button>
-      <span className="ml-auto hidden sm:inline-flex items-center bg-white text-teal text-xs font-semibold px-3.5 py-2 rounded-full">{syncedLabel}</span>
-      <button
-        onClick={onBell}
-        aria-label={`Alerts, ${alertCount} active`}
-        className="ml-auto sm:ml-0 relative w-11 h-11 rounded-full bg-white text-pine flex items-center justify-center hover:bg-white/70 transition-colors"
-      >
-        <Icon name="bell" size={20} />
-        {alertCount > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-5 h-5 px-1 rounded-full bg-rose text-pine text-[10px] font-bold flex items-center justify-center">{alertCount}</span>
+      <div className="ml-auto flex items-center gap-2">
+        {sampleData && (
+          <span title="Person 3 shows the bins as if just emptied, to preview the all-clear look" className="inline-flex items-center bg-teal text-ivory text-xs font-semibold px-3.5 py-2 rounded-full">Sample data</span>
         )}
-      </button>
+        <span className="hidden sm:inline-flex items-center bg-white text-teal text-xs font-semibold px-3.5 py-2 rounded-full">{syncedLabel}</span>
+        <button
+          onClick={onBell}
+          aria-label={`Alerts, ${alertCount} active`}
+          className="relative w-11 h-11 rounded-full bg-white text-pine flex items-center justify-center hover:bg-white/70 transition-colors"
+        >
+          <Icon name="bell" size={20} />
+          {alertCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 min-w-5 h-5 px-1 rounded-full bg-rose text-pine text-[10px] font-bold flex items-center justify-center">{alertCount}</span>
+          )}
+        </button>
+      </div>
     </div>
   )
 }
@@ -1090,7 +1106,7 @@ function SummaryPage({
   statusCounts: Record<Status, number>
   campusAvg: number
   onlineCount: number
-  zones: { zone: Zone; critical: number; total: number }[]
+  zones: { zone: Zone; pickup: number; total: number }[]
   topAlerts: Alert[]
   alertCount: number
   onShowOnMap: (binId: string) => void
@@ -1109,12 +1125,12 @@ function SummaryPage({
         <span className="sm:hidden mt-3 inline-flex items-center bg-white text-teal text-xs font-semibold px-3.5 py-2 rounded-full">{syncedLabel}</span>
       </div>
 
-      {/* bento: 2 columns on phone and ipad portrait, 4 from 1024px. zones is one area
-          holding all zone tiles, so a third zone just wraps */}
+      {/* bento: 2 columns on phone and ipad portrait, 4 from 1024px. the pickup tile lists
+          every zone as a row, so more zones grow it instead of adding tiles */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4
-        [grid-template-areas:'hero_hero'_'status_status'_'gauge_map'_'zones_zones'_'alerts_alerts']
-        md:[grid-template-areas:'hero_hero'_'status_status'_'zones_zones'_'map_map'_'gauge_alerts']
-        lg:[grid-template-areas:'hero_hero_gauge_status'_'map_map_zones_zones'_'map_map_alerts_alerts']">
+        [grid-template-areas:'hero_hero'_'status_status'_'gauge_map'_'pickup_pickup'_'alerts_alerts']
+        md:[grid-template-areas:'hero_hero'_'status_status'_'pickup_pickup'_'map_map'_'gauge_alerts']
+        lg:[grid-template-areas:'hero_hero_gauge_status'_'map_map_pickup_pickup'_'map_map_alerts_alerts']">
 
         {/* hero: fullest online bin */}
         {hero ? (
@@ -1187,30 +1203,13 @@ function SummaryPage({
           </button>
         </div>
 
-        {/* one tile per zone (critical count out of its bins), then the pickup tile. they pair up
-            two to a row; an odd one out spans the row, so there's never an empty slot */}
-        <div className="[grid-area:zones] grid grid-cols-2 gap-3 lg:gap-4">
-          {zones.map((z, i) => (
-            <button
-              key={z.zone}
-              onClick={() => onZone(z.zone)}
-              aria-label={`${z.zone}: ${z.critical} critical of ${z.total} bins. Show this zone`}
-              className={`${TILE} text-left min-h-[132px] flex flex-col hover:brightness-[0.97] transition ${i % 2 ? 'bg-teal-soft' : 'bg-olive-soft'}`}
-            >
-              <span className="flex items-center justify-between w-full text-sm font-semibold text-pine">
-                {z.zone}
-                <Icon name="arrowRight" size={18} />
-              </span>
-              <span className="mt-auto pt-3 font-mono text-4xl font-semibold text-pine leading-none">{z.critical}</span>
-              <span className={`text-xs mt-1 ${i % 2 ? 'text-teal' : 'text-olive-ink'}`}>critical of {z.total} bins</span>
-            </button>
-          ))}
-
-          {/* rose = needs attention; olive when nothing does */}
+        {/* one tile for pickups: the total up top, then a row per zone. rose while anything
+            needs pickup, olive when nothing does. fills the whole area for any number of zones */}
+        <div className={`[grid-area:pickup] ${TILE} flex flex-col ${needPickup === 0 ? 'bg-olive-soft' : 'bg-rose/20'}`}>
           <button
             onClick={onPickup}
             aria-label={needPickup === 0 ? 'All clear, no bins need pickup. Show all bins' : `${needPickup} ${needPickup === 1 ? 'bin needs' : 'bins need'} pickup. Show bins, fullest first`}
-            className={`${TILE} text-left min-h-[132px] flex flex-col hover:brightness-[0.97] transition ${zones.length % 2 ? '' : 'col-span-2'} ${needPickup === 0 ? 'bg-olive-soft' : 'bg-rose/20'}`}
+            className="text-left rounded-2xl -m-2 p-2 hover:bg-white/40 transition-colors"
           >
             <span className="flex items-center justify-between w-full text-sm font-semibold text-pine">
               Needs pickup
@@ -1218,16 +1217,29 @@ function SummaryPage({
             </span>
             {needPickup === 0 ? (
               <>
-                <span className="mt-auto pt-3 text-2xl font-semibold text-pine leading-none">All clear</span>
-                <span className="text-xs mt-1.5 text-olive-ink">No bins need pickup</span>
+                <span className="block mt-3 text-3xl font-bold text-pine leading-none">All clear</span>
+                <span className="block text-sm mt-1.5 text-olive-ink">No bins need pickup</span>
               </>
             ) : (
-              <>
-                <span className="mt-auto pt-3 font-mono text-4xl font-semibold text-pine leading-none">{needPickup}</span>
-                <span className="text-xs mt-1 text-pine">{needPickup === 1 ? 'bin needs' : 'bins need'} pickup</span>
-              </>
+              <span className="block mt-3 text-3xl font-bold text-pine leading-tight">
+                <span className="font-mono">{needPickup}</span> {needPickup === 1 ? 'bin needs' : 'bins need'} pickup
+              </span>
             )}
           </button>
+          <div className="mt-4 border-t border-pine/10 divide-y divide-pine/10">
+            {zones.map(z => (
+              <button
+                key={z.zone}
+                onClick={() => onZone(z.zone)}
+                aria-label={`${z.zone}: ${z.pickup} of ${z.total} bins need pickup. Show this zone`}
+                className="w-full flex items-center gap-3 min-h-11 py-2 px-2 -mx-2 text-left rounded-xl hover:bg-white/40 transition-colors"
+              >
+                <span className="flex-1 text-sm font-semibold text-pine">{z.zone}</span>
+                <span className="text-sm text-pine"><span className="font-mono font-bold">{z.pickup}</span> of {z.total} bins</span>
+                <Icon name="arrowRight" size={16} />
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className={`[grid-area:alerts] ${TILE} bg-white`}>
@@ -1296,7 +1308,7 @@ function minutesAgo(label: string) {
 // main app
 
 export default function App() {
-  // demo sign-in: the avatar switches between person 1 and person 2
+  // demo sign-in: the avatar cycles person 1 (editor), person 2 (viewer), person 3 (viewer, sample data)
   const [currentUserId, setCurrentUserId] = useState('s1')
   const [filterZone, setFilterZone] = useState<Zone | 'All'>('All')
   const [sortBy, setSortBy] = useState<'fill' | 'zone' | 'status' | 'name'>('fill')
@@ -1315,7 +1327,11 @@ export default function App() {
   const currentRole = currentUser.role
   const visibleZones = currentRole === 'editor' ? ALL_ZONES : ALL_ZONES.filter(z => currentUser.zones.includes(z))
   const zonesKey = visibleZones.join()
-  const myBins = useMemo(() => TRIBINS.filter(b => visibleZones.includes(b.zone)), [zonesKey])
+  const sampleData = currentUserId === SAMPLE_USER_ID
+  const myBins = useMemo(
+    () => (sampleData ? SAMPLE_CLEAR_BINS : TRIBINS).filter(b => visibleZones.includes(b.zone)),
+    [zonesKey, sampleData],
+  )
   const noZones = myBins.length === 0
 
   const [viewMode, setViewMode] = useState<'cards' | 'map'>('cards')
@@ -1398,7 +1414,7 @@ export default function App() {
   const campusAvg = onlineBins.length ? Math.round(onlineBins.reduce((s, b) => s + avgFill(b), 0) / onlineBins.length) : 0
   const zoneCounts = visibleZones.map(zone => {
     const zb = myBins.filter(b => b.zone === zone)
-    return { zone, critical: zb.filter(b => binStatus(b) === 'critical').length, total: zb.length }
+    return { zone, pickup: zb.filter(b => b.sensorStatus === 'online' && maxFill(b) >= alertThreshold).length, total: zb.length }
   })
   const syncedMin = Math.min(...onlineBins.map(b => minutesAgo(b.lastUpdated)))
   const syncedLabel = !Number.isFinite(syncedMin) ? 'Not synced' : syncedMin < 60 ? `Synced ${syncedMin} min ago` : `Synced ${Math.floor(syncedMin / 60)} hr ago`
@@ -1520,7 +1536,8 @@ export default function App() {
           greeting={greeting}
           syncedLabel={syncedLabel}
           alertCount={unreadCount}
-          onSwitchUser={() => setCurrentUserId(id => (id === 's1' ? 's2' : 's1'))}
+          onSwitchUser={() => setCurrentUserId(id => ({ s1: 's2', s2: 's3' } as Record<string, string>)[id] ?? 's1')}
+          sampleData={sampleData}
           onBell={openAlerts}
         />
 
