@@ -1,11 +1,12 @@
 import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
 import type { KeyboardEvent } from 'react'
-import { divIcon, latLngBounds, DomUtil } from 'leaflet'
-import type { LatLngBounds, LatLngTuple, Point } from 'leaflet'
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
+import { divIcon, latLngBounds } from 'leaflet'
+import type { LatLngBounds, LatLngTuple, Layer, Point } from 'leaflet'
+import { MapContainer, TileLayer, ImageOverlay, Pane, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import logoUrl from './imports/logo.png'
 import { mockBins } from './data/mockBins'
+import { campusBoundary } from './data/campusBoundary'
 
 // fill bands: green 0-49, yellow 50-79, red 80-100
 const WARN_AT = 50
@@ -253,11 +254,85 @@ function padMeters(bounds: LatLngBounds, meters: number) {
   )
 }
 
-// campus area: every bin plus ~300 m, from the data so new bins widen it.
-// outside it the map is blurred, and you can pan at most 200 m past it
-const CAMPUS = padMeters(latLngBounds(TRIBINS.map(binLatLng)), 300)
+// the campus outline, widened to any bin that's ever placed past it.
+// you can pan at most 200 m beyond it
+const CAMPUS = latLngBounds(campusBoundary.map(([lng, lat]): LatLngTuple => [lat, lng]))
+  .extend(latLngBounds(TRIBINS.map(binLatLng)))
 const MAP_LIMIT = padMeters(CAMPUS, 200)
-const BLUR_FEATHER = 32 // px of soft edge between sharp campus and blur
+
+// fog outside the campus outline
+
+// reaches well past MAP_LIMIT so a zoomed-out view never sees its edge
+const FOG_BOUNDS = padMeters(MAP_LIMIT, 2000)
+const FOG_FEATHER_M = 120 // soft edge, in meters, from clear campus to full fog
+const FOG_OPACITY = 0.8
+
+function mercatorY(lat: number) {
+  const r = (lat * Math.PI) / 180
+  return Math.log(Math.tan(Math.PI / 4 + r / 2))
+}
+
+// three passes approximate a gaussian blur
+function boxBlur(src: Float32Array, w: number, h: number, r: number) {
+  const tmp = new Float32Array(src.length)
+  const n = 2 * r + 1
+  const cx = (x: number) => Math.min(w - 1, Math.max(0, x))
+  const cy = (y: number) => Math.min(h - 1, Math.max(0, y))
+  for (let y = 0; y < h; y++) {
+    const row = y * w
+    let sum = 0
+    for (let x = -r; x <= r; x++) sum += src[row + cx(x)]
+    for (let x = 0; x < w; x++) {
+      tmp[row + x] = sum / n
+      sum += src[row + cx(x + r + 1)] - src[row + cx(x - r)]
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let sum = 0
+    for (let y = -r; y <= r; y++) sum += tmp[cy(y) * w + x]
+    for (let y = 0; y < h; y++) {
+      src[y * w + x] = sum / n
+      sum += tmp[cy(y + r + 1) * w + x] - tmp[cy(y - r) * w + x]
+    }
+  }
+}
+
+// drawn once into an image over FOG_BOUNDS (in web mercator, like the map), then the map
+// scales it like a photo, so panning and zooming cost nothing: clear inside the outline,
+// sage fog outside, feathered between
+let fogUrl: string | undefined
+function fogImage() {
+  if (fogUrl) return fogUrl
+  const west = FOG_BOUNDS.getWest()
+  const top = mercatorY(FOG_BOUNDS.getNorth())
+  const bottom = mercatorY(FOG_BOUNDS.getSouth())
+  const spanX = ((FOG_BOUNDS.getEast() - west) * Math.PI) / 180
+  const w = 1024
+  const h = Math.round((w * (top - bottom)) / spanX)
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')!
+  ctx.beginPath()
+  for (const [lng, lat] of campusBoundary) {
+    ctx.lineTo((((lng - west) * Math.PI) / 180 / spanX) * w, ((top - mercatorY(lat)) / (top - bottom)) * h)
+  }
+  ctx.fill()
+
+  const img = ctx.getImageData(0, 0, w, h)
+  const inside = new Float32Array(w * h)
+  for (let i = 0; i < inside.length; i++) inside[i] = img.data[i * 4 + 3] / 255
+  // feather ~ 10-90% of a gaussian (2.56 sigma), split over 3 box passes
+  const metersPerPx = (spanX * 6_378_137 * Math.cos((CAMPUS.getCenter().lat * Math.PI) / 180)) / w
+  const sigma = FOG_FEATHER_M / 2.56 / metersPerPx
+  const r = Math.max(1, Math.round((Math.sqrt(4 * sigma * sigma + 1) - 1) / 2))
+  for (let pass = 0; pass < 3; pass++) boxBlur(inside, w, h, r)
+  for (let i = 0; i < inside.length; i++) {
+    img.data.set([240, 244, 238, Math.round((1 - inside[i]) * FOG_OPACITY * 255)], i * 4) // sage
+  }
+  ctx.putImageData(img, 0, 0)
+  return (fogUrl = canvas.toDataURL())
+}
 
 // pins closer than minGap px on screen share one bubble, the picked bin always stands alone
 function groupPins(bins: Tribin[], selectedId: string | null, toPoint: (bin: Tribin) => Point, minGap: number) {
@@ -632,41 +707,76 @@ function BinMapLayers({ bins, fitKey, selectedId, focus, onSelect, onClosePopup,
   )
 }
 
-// blurs and washes out everything outside CAMPUS. it's a viewport-sized layer in its own
-// pane between the tiles and the pins (so pins and cards stay sharp), masked with a
-// feathered hole over the campus that's re-placed on every move
-function CampusBlur() {
-  const map = useMap()
-  useEffect(() => {
-    const pane = map.getPane('campusBlur') ?? map.createPane('campusBlur')
-    pane.style.zIndex = '450' // over tiles (200) and overlays (400), under pins (600)
-    pane.style.pointerEvents = 'none'
-    const el = DomUtil.create('div', '', pane)
-    el.style.setProperty('background', 'rgb(240 244 238 / .55)') // sage wash
-    for (const p of ['backdrop-filter', '-webkit-backdrop-filter']) el.style.setProperty(p, 'blur(4px)')
+// base map: openfreemap's positron (free, no key, no limits, osm data), drawn by maplibre
+const VECTOR_STYLE = 'https://tiles.openfreemap.org/styles/positron'
+const VECTOR_CREDIT =
+  '<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> © <a href="https://www.openmaptiles.org/" target="_blank">OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
+const OSM_CREDIT = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+// dotted/dashed clutter: footpaths and their names, rail hatching, admin boundaries
+const HIDDEN_LAYERS = new Set([
+  'highway_path', 'highway-name-path',
+  'railway_dashline', 'railway_transit_dashline', 'railway_service_dashline',
+  'boundary_2', 'boundary_3', 'boundary_disputed',
+])
 
-    const update = () => {
-      const size = map.getSize()
-      DomUtil.setPosition(el, map.containerPointToLayerPoint([0, 0]))
-      el.style.width = `${size.x}px`
-      el.style.height = `${size.y}px`
-      const nw = map.latLngToContainerPoint(CAMPUS.getNorthWest())
-      const se = map.latLngToContainerPoint(CAMPUS.getSouthEast())
-      const f = BLUR_FEATHER / 2
-      // opaque left/right of campus + opaque above/below it = clear only inside
-      const mask =
-        `linear-gradient(to right, #000 ${nw.x - f}px, transparent ${nw.x + f}px, transparent ${se.x - f}px, #000 ${se.x + f}px), ` +
-        `linear-gradient(to bottom, #000 ${nw.y - f}px, transparent ${nw.y + f}px, transparent ${se.y - f}px, #000 ${se.y + f}px)`
-      for (const p of ['mask-image', '-webkit-mask-image']) el.style.setProperty(p, mask)
+// maplibre + its worker (~420 KB gzipped) are only fetched when map view first opens. if it, the style,
+// or webgl fails, falls back to the plain osm tiles, grayed so the pins still stand out
+function BaseMap() {
+  const map = useMap()
+  const [fallback, setFallback] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    let layer: Layer | undefined
+    const fail = () => {
+      if (layer) map.removeLayer(layer)
+      layer = undefined
+      if (!cancelled) setFallback(true)
     }
-    update()
-    map.on('move zoom resize viewreset', update)
+    Promise.all([
+      import('maplibre-gl'),
+      // maplibre finds its worker next to its own file at runtime, which vite neither
+      // bundles nor keeps in place; ?worker&url makes vite bundle it and hand us the url
+      import('maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'),
+      import('@maplibre/maplibre-gl-leaflet'),
+      import('maplibre-gl/dist/maplibre-gl.css'),
+      fetch(VECTOR_STYLE).then(r => (r.ok ? r.json() : Promise.reject(r.status))),
+    ])
+      .then(([maplibre, { default: workerUrl }, { maplibreGL }, , style]) => {
+        if (cancelled) return
+        maplibre.setWorkerUrl(workerUrl)
+        // hide before first paint rather than after load, so the clutter never flashes
+        for (const l of style.layers) if (HIDDEN_LAYERS.has(l.id)) l.layout = { ...l.layout, visibility: 'none' }
+        layer = maplibreGL({ style, attributionControl: { customAttribution: VECTOR_CREDIT } }).addTo(map)
+        const gl = (layer as ReturnType<typeof maplibreGL>).getMaplibreMap()
+        let loaded = false
+        gl.once('load', () => { loaded = true })
+        gl.on('error', () => { if (!loaded) fail() })
+      })
+      .catch(fail)
     return () => {
-      map.off('move zoom resize viewreset', update)
-      el.remove()
+      cancelled = true
+      if (layer) map.removeLayer(layer)
     }
   }, [map])
-  return null
+
+  return fallback ? (
+    <TileLayer
+      url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+      maxZoom={MAX_ZOOM}
+      attribution={OSM_CREDIT}
+      className="[filter:grayscale(.85)_brightness(1.05)_contrast(.9)]"
+    />
+  ) : null
+}
+
+// the fog sits in its own pane between the base map and the pins, so pins and cards stay sharp
+function CampusFog() {
+  return (
+    <Pane name="campusFog" style={{ zIndex: 450 }}>
+      <ImageOverlay url={fogImage()} bounds={FOG_BOUNDS} />
+    </Pane>
+  )
 }
 
 // fades out while a bin card is open: leaflet stacks pins and popups in one pane,
@@ -709,14 +819,8 @@ function BinMap(props: BinMapProps) {
     // isolate keeps leaflet's z-indexes (up to 1000) below the sticky nav and the detail popup
     <div className="relative isolate h-[60vh] min-h-[320px] max-h-[640px] bg-white rounded-2xl border border-stone-200/80 overflow-hidden">
       <MapContainer {...initial} maxZoom={MAX_ZOOM} maxBounds={MAP_LIMIT} maxBoundsViscosity={1} className="h-full w-full">
-        <TileLayer
-          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-          maxZoom={MAX_ZOOM}
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          // mute only the base map so the status colors of the pins stand out
-          className="[filter:grayscale(.85)_brightness(1.05)_contrast(.9)]"
-        />
-        <CampusBlur />
+        <BaseMap />
+        <CampusFog />
         <BinMapLayers {...props} />
       </MapContainer>
       <MapLegend hidden={bins.some(b => b.id === props.selectedId)} />
