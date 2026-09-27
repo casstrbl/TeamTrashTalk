@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
+import { useState, useMemo, useEffect, useLayoutEffect, useRef, Fragment } from 'react'
 import type { KeyboardEvent } from 'react'
 import { divIcon, latLngBounds } from 'leaflet'
 import type { LatLngBounds, LatLngTuple, Layer, Point } from 'leaflet'
@@ -1121,6 +1121,30 @@ function SummaryPage({
   onAlert: (binId: string) => void
   onViewAllAlerts: () => void
 }) {
+  // tiles fade and rise into place as they scroll into view (styles in index.css). marked here,
+  // before the first paint, rather than in the markup, so if this never runs they just show.
+  // tiles arriving together ripple in 70ms apart; each reveals once per visit to the page
+  const gridRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (!gridRef.current || !('IntersectionObserver' in window)) return
+    const tiles = [...gridRef.current.children] as HTMLElement[]
+    for (const t of tiles) t.setAttribute('data-reveal', '')
+    const io = new IntersectionObserver(entries => {
+      entries
+        .filter(e => e.isIntersecting)
+        // ripple top-to-bottom as laid out on screen, not in source order (they differ per layout)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top || a.boundingClientRect.left - b.boundingClientRect.left)
+        .forEach((e, i) => {
+        const el = e.target as HTMLElement
+        el.style.transitionDelay = `${i * 70}ms`
+        el.setAttribute('data-shown', '')
+        io.unobserve(el)
+      })
+    }, { rootMargin: '0px 0px -6% 0px', threshold: 0.12 })
+    for (const t of tiles) io.observe(t)
+    return () => io.disconnect()
+  }, [])
+
   return (
     <>
       <div>
@@ -1130,7 +1154,7 @@ function SummaryPage({
 
       {/* bento: 2 columns on phones and portrait tablets, 4 on desk (wide landscape). the pickup tile lists
           every zone as a row, so more zones grow it instead of adding tiles */}
-      <div className="grid grid-cols-2 desk:grid-cols-4 gap-3 desk:gap-4
+      <div ref={gridRef} className="grid grid-cols-2 desk:grid-cols-4 gap-3 desk:gap-4
         [grid-template-areas:'hero_hero'_'pickup_pickup'_'status_status'_'gauge_map'_'alerts_alerts']
         md:[grid-template-areas:'hero_hero'_'pickup_pickup'_'status_status'_'map_map'_'gauge_alerts']
         desk:[grid-template-areas:'hero_hero_gauge_status'_'map_map_pickup_pickup'_'map_map_alerts_alerts']">
