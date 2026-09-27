@@ -1130,8 +1130,8 @@ function SummaryPage({
       {/* bento: 2 columns on phone and ipad portrait, 4 from 1024px. the pickup tile lists
           every zone as a row, so more zones grow it instead of adding tiles */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4
-        [grid-template-areas:'hero_hero'_'status_status'_'pickup_pickup'_'gauge_map'_'alerts_alerts']
-        md:[grid-template-areas:'hero_hero'_'status_status'_'pickup_pickup'_'map_map'_'gauge_alerts']
+        [grid-template-areas:'hero_hero'_'pickup_pickup'_'status_status'_'gauge_map'_'alerts_alerts']
+        md:[grid-template-areas:'hero_hero'_'pickup_pickup'_'status_status'_'map_map'_'gauge_alerts']
         lg:[grid-template-areas:'hero_hero_gauge_status'_'map_map_pickup_pickup'_'map_map_alerts_alerts']">
 
         {/* hero: fullest online bin */}
@@ -1214,20 +1214,20 @@ function SummaryPage({
             aria-label={needPickup === 0 ? 'All clear, no bins need pickup. Show all bins' : `${needPickup} ${needPickup === 1 ? 'bin needs' : 'bins need'} pickup. Show bins, fullest first`}
             className="text-left rounded-2xl -m-2 p-2 hover:bg-white/40 transition-colors"
           >
-            <span className="flex items-center justify-between w-full text-sm font-semibold text-pine">
-              Needs pickup
-              <Icon name={needPickup === 0 ? 'circleCheck' : 'arrowRight'} size={18} />
+            {/* the count is the title */}
+            <span className="flex items-start justify-between gap-3 w-full text-pine">
+              {needPickup === 0 ? (
+                <span>
+                  <span className="block text-3xl font-bold leading-none">All clear</span>
+                  <span className="block text-sm mt-1.5 text-olive-ink">No bins need pickup</span>
+                </span>
+              ) : (
+                <span className="text-3xl font-bold leading-tight">
+                  <span className="font-mono">{needPickup}</span> {needPickup === 1 ? 'bin needs' : 'bins need'} pickup
+                </span>
+              )}
+              <span className="shrink-0 mt-1.5"><Icon name={needPickup === 0 ? 'circleCheck' : 'arrowRight'} size={22} /></span>
             </span>
-            {needPickup === 0 ? (
-              <>
-                <span className="block mt-3 text-3xl font-bold text-pine leading-none">All clear</span>
-                <span className="block text-sm mt-1.5 text-olive-ink">No bins need pickup</span>
-              </>
-            ) : (
-              <span className="block mt-3 text-3xl font-bold text-pine leading-tight">
-                <span className="font-mono">{needPickup}</span> {needPickup === 1 ? 'bin needs' : 'bins need'} pickup
-              </span>
-            )}
           </button>
           <div className="mt-4 border-t border-pine/10 divide-y divide-pine/10">
             {zones.map(z => (
