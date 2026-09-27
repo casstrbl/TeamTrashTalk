@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
 import type { KeyboardEvent } from 'react'
-import { divIcon, latLngBounds } from 'leaflet'
-import type { LatLngTuple, Point } from 'leaflet'
+import { divIcon, latLngBounds, DomUtil } from 'leaflet'
+import type { LatLngBounds, LatLngTuple, Point } from 'leaflet'
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import logoUrl from './imports/logo.png'
@@ -243,6 +243,21 @@ function groupIcon(bins: Tribin[]) {
 function binLatLng(bin: Tribin): LatLngTuple {
   return [bin.lat, bin.lng]
 }
+
+function padMeters(bounds: LatLngBounds, meters: number) {
+  const dLat = meters / 111_320
+  const dLng = meters / (111_320 * Math.cos((bounds.getCenter().lat * Math.PI) / 180))
+  return latLngBounds(
+    [bounds.getSouth() - dLat, bounds.getWest() - dLng],
+    [bounds.getNorth() + dLat, bounds.getEast() + dLng],
+  )
+}
+
+// campus area: every bin plus ~300 m, from the data so new bins widen it.
+// outside it the map is blurred, and you can pan at most 200 m past it
+const CAMPUS = padMeters(latLngBounds(TRIBINS.map(binLatLng)), 300)
+const MAP_LIMIT = padMeters(CAMPUS, 200)
+const BLUR_FEATHER = 32 // px of soft edge between sharp campus and blur
 
 // pins closer than minGap px on screen share one bubble, the picked bin always stands alone
 function groupPins(bins: Tribin[], selectedId: string | null, toPoint: (bin: Tribin) => Point, minGap: number) {
@@ -521,6 +536,14 @@ function BinMapLayers({ bins, fitKey, selectedId, focus, onSelect, onClosePopup,
   })
   const popupBin = bins.find(b => b.id === selectedId)
 
+  // can't zoom out past the whole campus; depends on the map's size, so redo on resize
+  useEffect(() => {
+    const fit = () => map.setMinZoom(map.getBoundsZoom(CAMPUS))
+    fit()
+    map.on('resize', fit)
+    return () => { map.off('resize', fit) }
+  }, [map])
+
   // refit when the filters change, not on first render
   const lastFitKey = useRef(fitKey)
   useEffect(() => {
@@ -609,6 +632,43 @@ function BinMapLayers({ bins, fitKey, selectedId, focus, onSelect, onClosePopup,
   )
 }
 
+// blurs and washes out everything outside CAMPUS. it's a viewport-sized layer in its own
+// pane between the tiles and the pins (so pins and cards stay sharp), masked with a
+// feathered hole over the campus that's re-placed on every move
+function CampusBlur() {
+  const map = useMap()
+  useEffect(() => {
+    const pane = map.getPane('campusBlur') ?? map.createPane('campusBlur')
+    pane.style.zIndex = '450' // over tiles (200) and overlays (400), under pins (600)
+    pane.style.pointerEvents = 'none'
+    const el = DomUtil.create('div', '', pane)
+    el.style.setProperty('background', 'rgb(240 244 238 / .55)') // sage wash
+    for (const p of ['backdrop-filter', '-webkit-backdrop-filter']) el.style.setProperty(p, 'blur(4px)')
+
+    const update = () => {
+      const size = map.getSize()
+      DomUtil.setPosition(el, map.containerPointToLayerPoint([0, 0]))
+      el.style.width = `${size.x}px`
+      el.style.height = `${size.y}px`
+      const nw = map.latLngToContainerPoint(CAMPUS.getNorthWest())
+      const se = map.latLngToContainerPoint(CAMPUS.getSouthEast())
+      const f = BLUR_FEATHER / 2
+      // opaque left/right of campus + opaque above/below it = clear only inside
+      const mask =
+        `linear-gradient(to right, #000 ${nw.x - f}px, transparent ${nw.x + f}px, transparent ${se.x - f}px, #000 ${se.x + f}px), ` +
+        `linear-gradient(to bottom, #000 ${nw.y - f}px, transparent ${nw.y + f}px, transparent ${se.y - f}px, #000 ${se.y + f}px)`
+      for (const p of ['mask-image', '-webkit-mask-image']) el.style.setProperty(p, mask)
+    }
+    update()
+    map.on('move zoom resize viewreset', update)
+    return () => {
+      map.off('move zoom resize viewreset', update)
+      el.remove()
+    }
+  }, [map])
+  return null
+}
+
 // fades out while a bin card is open: leaflet stacks pins and popups in one pane,
 // so the legend can't sit between them and would cover the card
 function MapLegend({ hidden }: { hidden: boolean }) {
@@ -648,7 +708,7 @@ function BinMap(props: BinMapProps) {
   return (
     // isolate keeps leaflet's z-indexes (up to 1000) below the sticky nav and the detail popup
     <div className="relative isolate h-[60vh] min-h-[320px] max-h-[640px] bg-white rounded-2xl border border-stone-200/80 overflow-hidden">
-      <MapContainer {...initial} maxZoom={MAX_ZOOM} className="h-full w-full">
+      <MapContainer {...initial} maxZoom={MAX_ZOOM} maxBounds={MAP_LIMIT} maxBoundsViscosity={1} className="h-full w-full">
         <TileLayer
           url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
           maxZoom={MAX_ZOOM}
@@ -656,6 +716,7 @@ function BinMap(props: BinMapProps) {
           // mute only the base map so the status colors of the pins stand out
           className="[filter:grayscale(.85)_brightness(1.05)_contrast(.9)]"
         />
+        <CampusBlur />
         <BinMapLayers {...props} />
       </MapContainer>
       <MapLegend hidden={bins.some(b => b.id === props.selectedId)} />
