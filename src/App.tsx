@@ -7,6 +7,7 @@ import 'leaflet/dist/leaflet.css'
 import logoUrl from './imports/logo.png'
 import { mockBins } from './data/mockBins'
 import { campusBoundary } from './data/campusBoundary'
+import { campusBuildings } from './data/campusBuildings'
 
 // fill bands: green 0-49, yellow 50-79, red 80-100
 const WARN_AT = 50
@@ -719,6 +720,41 @@ const HIDDEN_LAYERS = new Set([
   'boundary_2', 'boundary_3', 'boundary_disputed',
 ])
 
+// positron's data has no names for plain campus buildings, so we bring our own (from osm).
+// maplibre hides labels that would collide; bigger buildings claim their spot first.
+// maplibre zooms run one below leaflet's (512px tiles), so 14.5 here is 15.5 in leaflet:
+// one step in from the whole-campus view
+const BUILDING_NAMES_SOURCE = {
+  type: 'geojson',
+  data: {
+    type: 'FeatureCollection',
+    features: campusBuildings.map(b => ({
+      type: 'Feature',
+      properties: { name: b.name, size: b.size },
+      geometry: { type: 'Point', coordinates: [b.lng, b.lat] },
+    })),
+  },
+}
+const BUILDING_NAMES_LAYER = {
+  id: 'campus-building-names',
+  type: 'symbol',
+  source: 'campusBuildings',
+  minzoom: 14.5,
+  layout: {
+    'text-field': ['get', 'name'],
+    'text-font': ['Noto Sans Regular'], // a font positron's glyph server has
+    'text-size': ['interpolate', ['linear'], ['zoom'], 14.5, 10, 17, 13],
+    'text-max-width': 8,
+    'text-padding': 4,
+    'symbol-sort-key': ['-', ['get', 'size']], // lower key places first
+  },
+  paint: {
+    'text-color': '#57534e', // stone-600
+    'text-halo-color': 'rgba(255, 255, 255, 0.9)',
+    'text-halo-width': 1.5,
+  },
+}
+
 // maplibre + its worker (~420 KB gzipped) are only fetched when map view first opens. if it, the style,
 // or webgl fails, falls back to the plain osm tiles, grayed so the pins still stand out
 function BaseMap() {
@@ -747,6 +783,8 @@ function BaseMap() {
         maplibre.setWorkerUrl(workerUrl)
         // hide before first paint rather than after load, so the clutter never flashes
         for (const l of style.layers) if (HIDDEN_LAYERS.has(l.id)) l.layout = { ...l.layout, visibility: 'none' }
+        style.sources.campusBuildings = BUILDING_NAMES_SOURCE
+        style.layers.push(BUILDING_NAMES_LAYER)
         layer = maplibreGL({ style, attributionControl: { customAttribution: VECTOR_CREDIT } }).addTo(map)
         const gl = (layer as ReturnType<typeof maplibreGL>).getMaplibreMap()
         let loaded = false
