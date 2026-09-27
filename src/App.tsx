@@ -949,12 +949,26 @@ export default function App() {
 
                   <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
                     <span className="text-stone-400 font-medium">Alert at</span>
+                    {/* -/+ look the same in every browser (ipad safari has no number arrows); before: pads the tap area */}
+                    <button
+                      onClick={() => setAlertThreshold(t => Math.max(10, t - 5))}
+                      disabled={alertThreshold <= 10}
+                      aria-label="Lower alert threshold"
+                      className="relative w-4 h-4 flex items-center justify-center font-semibold text-stone-400 hover:text-forest disabled:text-stone-200 transition-colors before:absolute before:-inset-x-1.5 before:-inset-y-3.5"
+                    >−</button>
                     <input
                       type="number" min={10} max={100} step={5} value={alertThreshold}
                       onChange={e => setAlertThreshold(Math.min(100, Math.max(10, Number(e.target.value) || 0)))}
-                      className="w-12 bg-transparent font-medium text-forest outline-none"
+                      aria-label="Alert threshold"
+                      className="w-7 text-center bg-transparent font-medium text-forest outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                     />
                     <span className="text-stone-400 font-medium">%</span>
+                    <button
+                      onClick={() => setAlertThreshold(t => Math.min(100, t + 5))}
+                      disabled={alertThreshold >= 100}
+                      aria-label="Raise alert threshold"
+                      className="relative w-4 h-4 flex items-center justify-center font-semibold text-stone-400 hover:text-forest disabled:text-stone-200 transition-colors before:absolute before:-inset-x-1.5 before:-inset-y-3.5"
+                    >+</button>
                   </div>
 
                   <span className="ml-auto text-xs text-stone-400 font-mono">{filteredBins.length} bin{filteredBins.length !== 1 ? 's' : ''}</span>
