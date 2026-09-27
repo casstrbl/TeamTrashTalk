@@ -1,6 +1,10 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 @import 'tailwindcss';
 
+/* desktop layout (sidebar, 4-column summary): wide AND landscape. width alone isn't enough:
+   an ipad pro in portrait is 1024px wide but should get the tablet layout with the bottom tab bar */
+@custom-variant desk (@media (min-width: 1024px) and (orientation: landscape));
+
 @theme inline {
   --font-display: 'Outfit', system-ui, sans-serif;
   --font-sans: 'Outfit', system-ui, sans-serif;

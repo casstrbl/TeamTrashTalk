@@ -929,7 +929,8 @@ const NAV_ITEMS: { page: Page; label: string; icon: keyof typeof ICONS; editorsO
   { page: 'admin', label: 'Admin', icon: 'settings', editorsOnly: true },
 ]
 
-// slim sidebar from 1024px (ipad landscape, desktop), floating pill at the bottom below that.
+// slim sidebar on wide landscape screens (desk: ipad landscape, desktop), floating pill at the
+// bottom otherwise (phones, and tablets in portrait, including the 1024px-wide ipad pro).
 // buttons are 48px, a little over apple's 44px minimum
 function NavRail({ page, role, onNavigate }: { page: Page; role: Role; onNavigate: (page: Page) => void }) {
   const items = NAV_ITEMS.filter(i => !i.editorsOnly || role === 'editor')
@@ -947,11 +948,11 @@ function NavRail({ page, role, onNavigate }: { page: Page; role: Role; onNavigat
   )
   return (
     <>
-      <nav aria-label="Main" className="hidden lg:flex fixed inset-y-0 left-0 z-40 w-[76px] bg-pine flex-col items-center gap-3 py-5">
+      <nav aria-label="Main" className="hidden desk:flex fixed inset-y-0 left-0 z-40 w-[76px] bg-pine flex-col items-center gap-3 py-5">
         <img src={logoUrl} alt="Sac State Sustainability" className="w-14 h-auto mb-4" />
         {items.map(button)}
       </nav>
-      <nav aria-label="Main" className="lg:hidden fixed bottom-0 inset-x-0 z-40 px-4 pb-[max(12px,env(safe-area-inset-bottom))] pointer-events-none">
+      <nav aria-label="Main" className="desk:hidden fixed bottom-0 inset-x-0 z-40 px-4 pb-[max(12px,env(safe-area-inset-bottom))] pointer-events-none">
         <div className="pointer-events-auto mx-auto max-w-md bg-pine rounded-full p-1.5 flex justify-between shadow-lg shadow-pine/30">
           {items.map(button)}
         </div>
@@ -1081,7 +1082,7 @@ function CampusSketch({ bins }: { bins: Tribin[] }) {
   )
 }
 
-const TILE = 'rounded-3xl p-5 lg:p-6'
+const TILE = 'rounded-3xl p-5 desk:p-6'
 
 const STATUS_PILLS: { status: Status; cls: string }[] = [
   { status: 'critical', cls: 'bg-critical-soft text-status-critical-ink' },
@@ -1127,12 +1128,12 @@ function SummaryPage({
         <span className="sm:hidden mt-3 inline-flex items-center bg-white text-teal text-xs font-semibold px-3.5 py-2 rounded-full">{syncedLabel}</span>
       </div>
 
-      {/* bento: 2 columns on phone and ipad portrait, 4 from 1024px. the pickup tile lists
+      {/* bento: 2 columns on phones and portrait tablets, 4 on desk (wide landscape). the pickup tile lists
           every zone as a row, so more zones grow it instead of adding tiles */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4
+      <div className="grid grid-cols-2 desk:grid-cols-4 gap-3 desk:gap-4
         [grid-template-areas:'hero_hero'_'pickup_pickup'_'status_status'_'gauge_map'_'alerts_alerts']
         md:[grid-template-areas:'hero_hero'_'pickup_pickup'_'status_status'_'map_map'_'gauge_alerts']
-        lg:[grid-template-areas:'hero_hero_gauge_status'_'map_map_pickup_pickup'_'map_map_alerts_alerts']">
+        desk:[grid-template-areas:'hero_hero_gauge_status'_'map_map_pickup_pickup'_'map_map_alerts_alerts']">
 
         {/* hero: fullest online bin */}
         {hero ? (
@@ -1169,13 +1170,13 @@ function SummaryPage({
             ipad portrait); on desktop they stretch to the tile's height. each opens details for it */}
         <div className={`[grid-area:status] ${TILE} bg-white flex flex-col`}>
           <p className="text-xs font-semibold text-pine mb-3">Status</p>
-          <div className="flex-1 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-2 auto-rows-fr gap-2">
+          <div className="flex-1 grid grid-cols-2 md:grid-cols-4 desk:grid-cols-2 auto-rows-fr gap-2">
             {STATUS_PILLS.map(s => (
               <button
                 key={s.status}
                 onClick={() => onStatus(s.status)}
                 aria-label={`${statusCounts[s.status]} ${statusLabel(s.status)}. Show these bins`}
-                className={`flex flex-col justify-center gap-1 min-h-11 px-3.5 lg:px-3 py-2.5 rounded-2xl text-left ${s.cls} hover:brightness-95 transition`}
+                className={`flex flex-col justify-center gap-1 min-h-11 px-3.5 desk:px-3 py-2.5 rounded-2xl text-left ${s.cls} hover:brightness-95 transition`}
               >
                 <span className="text-xs font-semibold">{statusLabel(s.status)}</span>
                 <span className="font-mono text-2xl font-bold leading-none">{statusCounts[s.status]}</span>
@@ -1191,7 +1192,7 @@ function SummaryPage({
         </div>
 
         {/* the campus is taller than wide, so the full-width ipad-portrait tile gets extra height */}
-        <div className={`[grid-area:map] ${TILE} bg-white flex flex-col gap-3 min-h-[220px] md:min-h-[380px] lg:min-h-[220px]`}>
+        <div className={`[grid-area:map] ${TILE} bg-white flex flex-col gap-3 min-h-[220px] md:min-h-[380px] desk:min-h-[220px]`}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs font-semibold text-teal">Campus map</p>
             <button onClick={onOpenMap} className="inline-flex items-center gap-1.5 bg-pine text-ivory text-sm font-semibold px-4 min-h-11 rounded-full hover:bg-forest-light transition-colors">
@@ -1428,7 +1429,8 @@ export default function App() {
     const el = (scrollReq.target === 'bins' && holder?.querySelector<HTMLElement>('[data-map]')) || holder
     if (!el) return
     const { top, bottom } = el.getBoundingClientRect()
-    const visibleBottom = window.innerHeight - (window.innerWidth < 1024 ? 96 : 0) // tab bar
+    const tabBar = !window.matchMedia('(min-width: 1024px) and (orientation: landscape)').matches // same as desk:
+    const visibleBottom = window.innerHeight - (tabBar ? 96 : 0)
     if (top >= 8 && bottom <= visibleBottom) return
     const lenis = lenisRef.current
     if (lenis) lenis.scrollTo(el, { force: true }) // lenis honors the target's scroll-mt-4 gap
@@ -1600,8 +1602,8 @@ export default function App() {
     <div className="min-h-screen bg-sage font-sans" style={{ fontFamily: 'Outfit, system-ui, sans-serif' }}>
       <NavRail page={page} role={currentRole} onNavigate={setPage} />
 
-      {/* left padding clears the sidebar from 1024px; the footer's clears the floating tab bar below that */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:pl-[calc(76px+2rem)] lg:pr-8 pt-5 lg:pt-8 pb-6 space-y-5 lg:space-y-6">
+      {/* left padding clears the sidebar on desk; the footer's clears the floating tab bar otherwise */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 desk:pl-[calc(76px+2rem)] desk:pr-8 pt-5 desk:pt-8 pb-6 space-y-5 desk:space-y-6">
         <TopBar
           userName={userName}
           role={currentRole}
@@ -1614,7 +1616,7 @@ export default function App() {
         />
 
         {/* keyed by page so the content fades in on every switch; the header and nav stay put */}
-        <div key={page} className="animate-page-in motion-reduce:animate-none space-y-5 lg:space-y-6">
+        <div key={page} className="animate-page-in motion-reduce:animate-none space-y-5 desk:space-y-6">
           {page === 'summary' && noZones && <NoZonesNotice />}
           {page === 'summary' && !noZones && (
             <SummaryPage
@@ -1956,7 +1958,7 @@ export default function App() {
       {selectedBin && <BinDetailModal bin={selectedBin} onClose={() => setSelectedBin(null)} />}
 
       {/* footer */}
-      <footer className="mt-10 border-t border-stone-200 pt-4 pb-28 lg:pb-4 px-6 lg:pl-[calc(76px+1.5rem)] text-center">
+      <footer className="mt-10 border-t border-stone-200 pt-4 pb-28 desk:pb-4 px-6 desk:pl-[calc(76px+1.5rem)] text-center">
         <p className="text-[11px] text-stone-400 font-mono">Bin Monitor · {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
       </footer>
     </div>
