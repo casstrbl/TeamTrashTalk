@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect, useLayoutEffect, useRef, Fragment } from 'react'
-import type { KeyboardEvent } from 'react'
+import { useState, useMemo, useEffect, useLayoutEffect, useRef, Fragment, createContext, useContext } from 'react'
+import type { KeyboardEvent, ReactNode, RefObject } from 'react'
 import { divIcon, latLngBounds } from 'leaflet'
 import type { LatLngBounds, LatLngTuple, Layer, Point } from 'leaflet'
 import { MapContainer, TileLayer, ImageOverlay, Pane, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
@@ -1084,6 +1084,49 @@ function CampusSketch({ bins }: { bins: Tribin[] }) {
 
 const TILE = 'rounded-3xl p-5 desk:p-6'
 
+// when the current page was opened (performance.now()), set by PageScope
+const PageOpenedAt = createContext(0)
+
+function PageScope({ children }: { children: ReactNode }) {
+  const [openedAt] = useState(() => performance.now())
+  return <PageOpenedAt.Provider value={openedAt}>{children}</PageOpenedAt.Provider>
+}
+
+// the element's children fade and rise into place as they scroll into view (styles in
+// index.css), rippling 70ms apart in on-screen order, once per visit to a page. only lists
+// there on arrival animate: ones that mount later (a filter or cards/map switch) just appear.
+// children are marked here, before the first paint, not in the markup, so they can't get
+// stuck hidden if this never runs
+function useReveal(ref: RefObject<HTMLElement | null>) {
+  const openedAt = useContext(PageOpenedAt)
+  useLayoutEffect(() => {
+    const root = ref.current
+    if (!root || performance.now() - openedAt > 600 || !('IntersectionObserver' in window)) return
+    const items = [...root.children] as HTMLElement[]
+    for (const el of items) el.setAttribute('data-reveal', '')
+    const io = new IntersectionObserver(entries => {
+      entries
+        .filter(e => e.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top || a.boundingClientRect.left - b.boundingClientRect.left)
+        .forEach((e, i) => {
+          const el = e.target as HTMLElement
+          el.style.transitionDelay = `${i * 70}ms`
+          el.setAttribute('data-shown', '')
+          io.unobserve(el)
+        })
+    }, { rootMargin: '0px 0px -6% 0px', threshold: 0.12 })
+    for (const el of items) io.observe(el)
+    return () => io.disconnect()
+  }, [])
+}
+
+// a div whose children get the reveal
+function Reveal({ className, children }: { className?: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useReveal(ref)
+  return <div ref={ref} className={className}>{children}</div>
+}
+
 const STATUS_PILLS: { status: Status; cls: string }[] = [
   { status: 'critical', cls: 'bg-critical-soft text-status-critical-ink' },
   { status: 'warn', cls: 'bg-warn-soft text-status-warn-ink' },
@@ -1121,29 +1164,9 @@ function SummaryPage({
   onAlert: (binId: string) => void
   onViewAllAlerts: () => void
 }) {
-  // tiles fade and rise into place as they scroll into view (styles in index.css). marked here,
-  // before the first paint, rather than in the markup, so if this never runs they just show.
-  // tiles arriving together ripple in 70ms apart; each reveals once per visit to the page
+  // tiles fade and rise into place as they scroll into view
   const gridRef = useRef<HTMLDivElement>(null)
-  useLayoutEffect(() => {
-    if (!gridRef.current || !('IntersectionObserver' in window)) return
-    const tiles = [...gridRef.current.children] as HTMLElement[]
-    for (const t of tiles) t.setAttribute('data-reveal', '')
-    const io = new IntersectionObserver(entries => {
-      entries
-        .filter(e => e.isIntersecting)
-        // ripple top-to-bottom as laid out on screen, not in source order (they differ per layout)
-        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top || a.boundingClientRect.left - b.boundingClientRect.left)
-        .forEach((e, i) => {
-        const el = e.target as HTMLElement
-        el.style.transitionDelay = `${i * 70}ms`
-        el.setAttribute('data-shown', '')
-        io.unobserve(el)
-      })
-    }, { rootMargin: '0px 0px -6% 0px', threshold: 0.12 })
-    for (const t of tiles) io.observe(t)
-    return () => io.disconnect()
-  }, [])
+  useReveal(gridRef)
 
   return (
     <>
@@ -1303,6 +1326,7 @@ function ComingSoon({ title, icon, text }: { title: string; icon: keyof typeof I
   return (
     <>
       <h1 className="text-3xl lg:text-4xl font-semibold text-pine">{title}</h1>
+      <Reveal>
       <div className={`${TILE} bg-white py-16 text-center`}>
         <span className="mx-auto mb-4 w-14 h-14 rounded-full bg-olive-soft text-olive-ink flex items-center justify-center">
           <Icon name={icon} size={26} />
@@ -1310,6 +1334,7 @@ function ComingSoon({ title, icon, text }: { title: string; icon: keyof typeof I
         <p className="text-lg font-semibold text-pine">Coming soon</p>
         <p className="text-sm text-pine-muted mt-1 max-w-sm mx-auto">{text}</p>
       </div>
+      </Reveal>
     </>
   )
 }
@@ -1641,6 +1666,8 @@ export default function App() {
 
         {/* keyed by page so the content fades in on every switch; the header and nav stay put */}
         <div key={page} className="animate-page-in motion-reduce:animate-none space-y-5 desk:space-y-6">
+        {/* records when this page was opened, so only what is there on arrival animates */}
+        <PageScope>
           {page === 'summary' && noZones && <NoZonesNotice />}
           {page === 'summary' && !noZones && (
             <SummaryPage
@@ -1774,11 +1801,11 @@ export default function App() {
                       onOpenDetail={setSelectedBin}
                     />
                   ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                    <Reveal className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                       {filteredBins.map(bin => (
                         <BinCard key={bin.id} bin={bin} onClick={() => setSelectedBin(bin)} onShowOnMap={() => showOnMap(bin.id)} highlighted={bin.id === mapBinId} />
                       ))}
-                    </div>
+                    </Reveal>
                   )}
                 </div>
 
@@ -1797,7 +1824,8 @@ export default function App() {
                     )}
                   </div>
 
-                  <div data-lenis-prevent className="space-y-2 max-h-[600px] overflow-y-auto pr-0.5">
+                  <div data-lenis-prevent className="max-h-[600px] overflow-y-auto pr-0.5">
+                    <Reveal className="space-y-2">
                     {visibleAlerts.length === 0 ? (
                       <div className="py-10 text-center text-stone-400">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-1"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>
@@ -1806,9 +1834,11 @@ export default function App() {
                     ) : visibleAlerts.map(a => (
                       <AlertItem key={a.id} alert={a} onDismiss={dismissAlert} onSelect={alert => showOnMap(alert.binId)} />
                     ))}
+                    </Reveal>
                   </div>
 
                   {/* summary stats */}
+                  <Reveal>
                   <div className="bg-white rounded-2xl border border-stone-200 p-4 mt-4">
                     <p className="text-[11px] uppercase tracking-widest text-stone-400 font-semibold mb-3">Landfill Activity</p>
                     <div className="grid grid-cols-2 gap-3">
@@ -1836,6 +1866,7 @@ export default function App() {
                       </div>
                     </div>
                   </div>
+                  </Reveal>
                 </aside>
               </div>
               )}
@@ -1854,7 +1885,7 @@ export default function App() {
               </div>
 
               {/* phones: one card per person (the table doesn't fit) */}
-              <div className="md:hidden space-y-3">
+              <Reveal className="md:hidden space-y-3">
                 {staffList.map(member => {
                   const editing = editingStaff === member.id
                   return (
@@ -1898,10 +1929,11 @@ export default function App() {
                     </div>
                   )
                 })}
-              </div>
+              </Reveal>
 
               {/* ipad and up: the table */}
-              <div className="hidden md:block bg-white rounded-2xl border border-stone-200 overflow-hidden">
+              <Reveal className="hidden md:block">
+              <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-stone-100 bg-sage">
@@ -1965,6 +1997,7 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
+              </Reveal>
             </div>
           )}
 
@@ -1975,6 +2008,7 @@ export default function App() {
               <p className="text-stone-500 text-sm">Editor access required.</p>
             </div>
           )}
+        </PageScope>
         </div>
       </main>
 
