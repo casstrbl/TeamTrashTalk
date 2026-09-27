@@ -1,10 +1,25 @@
-import { useState, useMemo, Fragment } from 'react'
+import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
+import type { KeyboardEvent } from 'react'
+import { divIcon, latLngBounds } from 'leaflet'
+import type { LatLngBounds, LatLngTuple, Layer, Point } from 'leaflet'
+import { MapContainer, TileLayer, ImageOverlay, Pane, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
+import 'leaflet/dist/leaflet.css'
 import logoUrl from './imports/logo.png'
 import { mockBins } from './data/mockBins'
+import { campusBoundary } from './data/campusBoundary'
+import { campusBuildings } from './data/campusBuildings'
 
 // fill bands: green 0-49, yellow 50-79, red 80-100
 const WARN_AT = 50
 const CRITICAL_AT = 80
+
+// map: dots when zoomed out, labeled pins from street level in
+const LABEL_ZOOM = 18
+const MAX_ZOOM = 19
+// apple's minimum tap size, every pin gets at least this much hit area
+const PIN_TAP = 44
+const OFFLINE_HEX = '#a8a29e'
+const MINT_HEX = '#52b788'
 
 // types
 
@@ -178,6 +193,162 @@ function compartmentColor(label: Stream) {
   return { Landfill: '#4b5563', Recycling: '#2563eb', Compost: '#16a34a' }[label]
 }
 
+// enter/space on a div acting as a button
+function onActivate(fn: () => void) {
+  return (e: KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      fn()
+    }
+  }
+}
+
+// map pin helpers
+
+// same colors as the card gauges, gray when offline
+function pinHex(bin: Tribin) {
+  return bin.sensorStatus === 'offline' ? OFFLINE_HEX : fillHex(maxFill(bin))
+}
+
+// which bin colors a group bubble
+const PIN_RANK: Record<Status, number> = { critical: 0, warn: 1, offline: 2, ok: 3 }
+
+// thin dark edge + drop shadow so pins lift off the muted map
+const PIN_SHADOW = '0 0 0 1px rgb(0 0 0 / .18), 0 2px 5px rgb(0 0 0 / .4)'
+
+function binIcon(bin: Tribin, labeled: boolean, selected: boolean) {
+  const hex = pinHex(bin)
+  const ring = selected ? `, 0 0 0 3px ${MINT_HEX}` : ''
+  const body = labeled
+    ? `<span class="flex items-center gap-1 bg-white rounded-full pl-1.5 pr-2 py-0.5 font-mono text-[11px] leading-none font-bold text-forest ${selected ? 'scale-110' : ''}" style="border:2px solid ${hex};box-shadow:${PIN_SHADOW}${ring}"><span class="w-2 h-2 rounded-full" style="background:${hex}"></span>${maxFill(bin)}%</span>`
+    : `<span class="block rounded-full border-[2.5px] border-white ${selected ? 'w-5 h-5' : 'w-4 h-4'}" style="background:${hex};box-shadow:${PIN_SHADOW}${ring}"></span>`
+  const w = labeled ? 56 : PIN_TAP
+  return divIcon({
+    className: '',
+    iconSize: [w, PIN_TAP],
+    iconAnchor: [w / 2, PIN_TAP / 2],
+    html: `<div class="w-full h-full flex items-center justify-center">${body}</div>`,
+  })
+}
+
+function groupIcon(bins: Tribin[]) {
+  const worst = [...bins].sort((a, b) => PIN_RANK[binStatus(a)] - PIN_RANK[binStatus(b)])[0]
+  return divIcon({
+    className: '',
+    iconSize: [PIN_TAP, PIN_TAP],
+    iconAnchor: [PIN_TAP / 2, PIN_TAP / 2],
+    html: `<div class="w-full h-full flex items-center justify-center"><span class="flex items-center justify-center w-7 h-7 rounded-full bg-white font-mono text-[11px] font-bold text-forest" style="border:3px solid ${pinHex(worst)};box-shadow:${PIN_SHADOW}">${bins.length}</span></div>`,
+  })
+}
+
+function binLatLng(bin: Tribin): LatLngTuple {
+  return [bin.lat, bin.lng]
+}
+
+function padMeters(bounds: LatLngBounds, meters: number) {
+  const dLat = meters / 111_320
+  const dLng = meters / (111_320 * Math.cos((bounds.getCenter().lat * Math.PI) / 180))
+  return latLngBounds(
+    [bounds.getSouth() - dLat, bounds.getWest() - dLng],
+    [bounds.getNorth() + dLat, bounds.getEast() + dLng],
+  )
+}
+
+// the campus outline, widened to any bin that's ever placed past it.
+// you can pan at most 200 m beyond it
+const CAMPUS = latLngBounds(campusBoundary.map(([lng, lat]): LatLngTuple => [lat, lng]))
+  .extend(latLngBounds(TRIBINS.map(binLatLng)))
+const MAP_LIMIT = padMeters(CAMPUS, 200)
+
+// fog outside the campus outline
+
+// reaches well past MAP_LIMIT so a zoomed-out view never sees its edge
+const FOG_BOUNDS = padMeters(MAP_LIMIT, 2000)
+const FOG_FEATHER_M = 120 // soft edge, in meters, from clear campus to full fog
+const FOG_OPACITY = 0.8
+
+function mercatorY(lat: number) {
+  const r = (lat * Math.PI) / 180
+  return Math.log(Math.tan(Math.PI / 4 + r / 2))
+}
+
+// three passes approximate a gaussian blur
+function boxBlur(src: Float32Array, w: number, h: number, r: number) {
+  const tmp = new Float32Array(src.length)
+  const n = 2 * r + 1
+  const cx = (x: number) => Math.min(w - 1, Math.max(0, x))
+  const cy = (y: number) => Math.min(h - 1, Math.max(0, y))
+  for (let y = 0; y < h; y++) {
+    const row = y * w
+    let sum = 0
+    for (let x = -r; x <= r; x++) sum += src[row + cx(x)]
+    for (let x = 0; x < w; x++) {
+      tmp[row + x] = sum / n
+      sum += src[row + cx(x + r + 1)] - src[row + cx(x - r)]
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let sum = 0
+    for (let y = -r; y <= r; y++) sum += tmp[cy(y) * w + x]
+    for (let y = 0; y < h; y++) {
+      src[y * w + x] = sum / n
+      sum += tmp[cy(y + r + 1) * w + x] - tmp[cy(y - r) * w + x]
+    }
+  }
+}
+
+// drawn once into an image over FOG_BOUNDS (in web mercator, like the map), then the map
+// scales it like a photo, so panning and zooming cost nothing: clear inside the outline,
+// sage fog outside, feathered between
+let fogUrl: string | undefined
+function fogImage() {
+  if (fogUrl) return fogUrl
+  const west = FOG_BOUNDS.getWest()
+  const top = mercatorY(FOG_BOUNDS.getNorth())
+  const bottom = mercatorY(FOG_BOUNDS.getSouth())
+  const spanX = ((FOG_BOUNDS.getEast() - west) * Math.PI) / 180
+  const w = 1024
+  const h = Math.round((w * (top - bottom)) / spanX)
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')!
+  ctx.beginPath()
+  for (const [lng, lat] of campusBoundary) {
+    ctx.lineTo((((lng - west) * Math.PI) / 180 / spanX) * w, ((top - mercatorY(lat)) / (top - bottom)) * h)
+  }
+  ctx.fill()
+
+  const img = ctx.getImageData(0, 0, w, h)
+  const inside = new Float32Array(w * h)
+  for (let i = 0; i < inside.length; i++) inside[i] = img.data[i * 4 + 3] / 255
+  // feather ~ 10-90% of a gaussian (2.56 sigma), split over 3 box passes
+  const metersPerPx = (spanX * 6_378_137 * Math.cos((CAMPUS.getCenter().lat * Math.PI) / 180)) / w
+  const sigma = FOG_FEATHER_M / 2.56 / metersPerPx
+  const r = Math.max(1, Math.round((Math.sqrt(4 * sigma * sigma + 1) - 1) / 2))
+  for (let pass = 0; pass < 3; pass++) boxBlur(inside, w, h, r)
+  for (let i = 0; i < inside.length; i++) {
+    img.data.set([240, 244, 238, Math.round((1 - inside[i]) * FOG_OPACITY * 255)], i * 4) // sage
+  }
+  ctx.putImageData(img, 0, 0)
+  return (fogUrl = canvas.toDataURL())
+}
+
+// pins closer than minGap px on screen share one bubble, the picked bin always stands alone
+function groupPins(bins: Tribin[], selectedId: string | null, toPoint: (bin: Tribin) => Point, minGap: number) {
+  const groups: { at: Point; bins: Tribin[] }[] = []
+  for (const bin of bins) {
+    const at = toPoint(bin)
+    const near = bin.id === selectedId
+      ? undefined
+      : groups.find(g => g.bins[0].id !== selectedId && g.at.distanceTo(at) < minGap)
+    if (near) near.bins.push(bin)
+    else groups.push({ at, bins: [bin] })
+  }
+  return groups.map(g => g.bins)
+}
+
 // sub-components
 
 function RingGauge({ fill, size = 56 }: { fill: number; size?: number }) {
@@ -229,12 +400,29 @@ function CompartmentBar({ label, fill }: { label: Stream; fill: number }) {
   )
 }
 
-function BinCard({ bin, onClick }: { bin: Tribin; onClick: () => void }) {
+function MapPinIcon({ size }: { size: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+      <path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>
+    </svg>
+  )
+}
+
+// div instead of button so the map button can sit inside it
+function BinCard({ bin, onClick, onShowOnMap, highlighted = false }: {
+  bin: Tribin
+  onClick: () => void
+  onShowOnMap?: () => void // no map button when omitted (the card inside the map popup)
+  highlighted?: boolean
+}) {
   const top = maxFill(bin)
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
-      className="group text-left bg-white rounded-2xl border border-stone-200/80 p-4 hover:border-emerald-300 hover:shadow-lg hover:shadow-emerald-900/5 transition-all duration-200 cursor-pointer"
+      onKeyDown={onActivate(onClick)}
+      className={`group text-left bg-white rounded-2xl border p-4 hover:border-emerald-300 hover:shadow-lg hover:shadow-emerald-900/5 transition-all duration-200 cursor-pointer ${highlighted ? 'border-mint ring-2 ring-mint/30' : 'border-stone-200/80'}`}
     >
       <div className="flex items-start justify-between mb-3">
         <div>
@@ -267,17 +455,37 @@ function BinCard({ bin, onClick }: { bin: Tribin; onClick: () => void }) {
 
       <div className="flex items-center justify-between pt-2 border-t border-stone-100">
         <BatteryIcon level={bin.battery} />
-        <span className="text-[10px] text-stone-400 font-mono">{bin.lastUpdated}</span>
+        <div className="flex items-center gap-2">
+          {/* before: pads the tap area without changing the look */}
+          {onShowOnMap && (
+            <button
+              onClick={e => { e.stopPropagation(); onShowOnMap() }}
+              className="relative inline-flex items-center gap-1 text-[10px] leading-none font-semibold text-mint-dark bg-mint/10 hover:bg-mint/20 rounded-full px-2 py-0.5 transition-colors before:absolute before:-inset-x-2 before:-inset-y-3"
+              aria-label={`Show ${bin.name} on map`}
+            >
+              <MapPinIcon size={9} />
+              Map
+            </button>
+          )}
+          <span className="text-[10px] text-stone-400 font-mono">{bin.lastUpdated}</span>
+        </div>
       </div>
-    </button>
+    </div>
   )
 }
 
-function AlertItem({ alert, onDismiss }: { alert: Alert; onDismiss: (id: string) => void }) {
+function AlertItem({ alert, onDismiss, onSelect }: { alert: Alert; onDismiss: (id: string) => void; onSelect: (alert: Alert) => void }) {
   const dot = { critical: 'bg-red-500', warn: 'bg-amber-400', info: 'bg-blue-400' }[alert.severity]
   const bg = { critical: 'border-l-red-500 bg-red-50', warn: 'border-l-amber-400 bg-amber-50', info: 'border-l-blue-400 bg-blue-50' }[alert.severity]
   return (
-    <div className={`flex gap-3 p-3 border-l-2 rounded-r-lg ${bg}`}>
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect(alert)}
+      onKeyDown={onActivate(() => onSelect(alert))}
+      className={`flex gap-3 p-3 border-l-2 rounded-r-lg cursor-pointer hover:shadow-md hover:shadow-forest/5 transition-shadow ${bg}`}
+      title="Show on map"
+    >
       <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${dot}`} />
       <div className="flex-1 min-w-0">
         <p className="text-xs font-semibold text-forest">{alert.binName} · {alert.zone}</p>
@@ -285,9 +493,10 @@ function AlertItem({ alert, onDismiss }: { alert: Alert; onDismiss: (id: string)
         <p className="text-[10px] text-stone-400 font-mono mt-1">{alert.time}</p>
       </div>
       <button
-        onClick={() => onDismiss(alert.id)}
+        onClick={e => { e.stopPropagation(); onDismiss(alert.id) }}
         className="text-stone-300 hover:text-stone-500 shrink-0 text-xs transition-colors"
         title="Dismiss"
+        aria-label="Dismiss alert"
       >✕</button>
     </div>
   )
@@ -296,6 +505,13 @@ function AlertItem({ alert, onDismiss }: { alert: Alert; onDismiss: (id: string)
 // modal: bin detail
 
 function BinDetailModal({ bin, onClose }: { bin: Tribin; onClose: () => void }) {
+  // esc closes
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-forest/40 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6" onClick={e => e.stopPropagation()}>
@@ -305,7 +521,7 @@ function BinDetailModal({ bin, onClose }: { bin: Tribin; onClose: () => void }) 
             <p className="text-sm text-stone-400">{bin.zone}</p>
             <p className="text-[11px] text-stone-400 font-mono mt-0.5">{bin.id}</p>
           </div>
-          <button onClick={onClose} className="text-stone-300 hover:text-stone-600 transition-colors text-lg">✕</button>
+          <button onClick={onClose} aria-label="Close" className="text-stone-300 hover:text-stone-600 transition-colors text-lg">✕</button>
         </div>
 
         <div className="flex justify-center mb-5">
@@ -358,6 +574,298 @@ function BinDetailModal({ bin, onClose }: { bin: Tribin; onClose: () => void }) 
   )
 }
 
+// map view
+
+interface MapFocus {
+  id: string
+  n: number // bumps so jumping to the same bin twice still flies there
+}
+
+// leaflet.css is unlayered so it beats tailwind utilities, hence the !s.
+// strips leaflet's popup chrome so the bin card is the popup, and undoes its
+// `.leaflet-popup-content p` margins (the card's second p has mt-0.5)
+const BIN_POPUP_CLASS = [
+  '[&_.leaflet-popup-content-wrapper]:p-0!',
+  '[&_.leaflet-popup-content-wrapper]:rounded-2xl!',
+  '[&_.leaflet-popup-content]:m-0!',
+  '[&_.leaflet-popup-content_p]:my-0!',
+  '[&_.leaflet-popup-content_p+p]:mt-0.5!',
+].join(' ')
+
+interface BinMapProps {
+  bins: Tribin[]
+  fitKey: string
+  selectedId: string | null
+  focus: MapFocus | null
+  onSelect: (id: string) => void
+  onClosePopup: () => void
+  onOpenDetail: (bin: Tribin) => void
+}
+
+function BinMapLayers({ bins, fitKey, selectedId, focus, onSelect, onClosePopup, onOpenDetail }: BinMapProps) {
+  const map = useMap()
+  const [zoom, setZoom] = useState(() => map.getZoom())
+  useMapEvents({
+    zoomend: () => setZoom(map.getZoom()),
+    // tapping empty map closes the card, marker taps don't reach here
+    click: onClosePopup,
+  })
+  const popupBin = bins.find(b => b.id === selectedId)
+
+  // can't zoom out past the whole campus; depends on the map's size, so redo on resize
+  useEffect(() => {
+    const fit = () => map.setMinZoom(map.getBoundsZoom(CAMPUS))
+    fit()
+    map.on('resize', fit)
+    return () => { map.off('resize', fit) }
+  }, [map])
+
+  // refit when the filters change, not on first render
+  const lastFitKey = useRef(fitKey)
+  useEffect(() => {
+    if (lastFitKey.current === fitKey) return
+    lastFitKey.current = fitKey
+    map.flyToBounds(latLngBounds(bins.map(binLatLng)), { padding: [40, 40], maxZoom: LABEL_ZOOM, duration: 0.6 })
+  }, [fitKey, bins, map])
+
+  // fly to a bin jumped to from a card, alert or the spotlight
+  const lastFocus = useRef(focus?.n)
+  useEffect(() => {
+    if (!focus || focus.n === lastFocus.current) return
+    lastFocus.current = focus.n
+    const bin = bins.find(b => b.id === focus.id)
+    if (!bin) return
+    const z = Math.max(map.getZoom(), LABEL_ZOOM)
+    // aim below center so the popup card (~210-225px tall) fits above the pin
+    const h = map.getSize().y
+    const lift = Math.min(Math.max(40 + 225 - h / 2, 0), h / 2 - 40)
+    map.flyTo(map.unproject(map.project(binLatLng(bin), z).subtract([0, lift]), z), z, { duration: 0.6 })
+  }, [focus, bins, map])
+
+  const labeled = zoom >= LABEL_ZOOM
+  const groups = useMemo(
+    () => groupPins(bins, selectedId, b => map.project(binLatLng(b), zoom), labeled ? 50 : PIN_TAP),
+    [bins, selectedId, zoom, labeled, map],
+  )
+
+  return (
+    <>
+      {groups.map(group => {
+        if (group.length === 1) {
+          const bin = group[0]
+          const selected = bin.id === selectedId
+          return (
+            <Marker
+              key={bin.id}
+              position={binLatLng(bin)}
+              icon={binIcon(bin, labeled, selected)}
+              title={`${bin.name} · ${maxFill(bin)}%`}
+              zIndexOffset={selected ? 1000 : 0}
+              riseOnHover
+              eventHandlers={{ click: () => onSelect(bin.id) }}
+            />
+          )
+        }
+        const bounds = latLngBounds(group.map(binLatLng))
+        return (
+          <Marker
+            key={group.map(b => b.id).join()}
+            position={bounds.getCenter()}
+            icon={groupIcon(group)}
+            title={`${group.map(b => b.name).join(', ')}: tap to zoom in`}
+            riseOnHover
+            eventHandlers={{ click: () => map.flyToBounds(bounds, { padding: [60, 60], maxZoom: MAX_ZOOM, duration: 0.6 }) }}
+          />
+        )
+      })}
+
+      {/* the picked bin's card, pinned to its marker. we own closing (✕ / map tap)
+          so leaflet's own close paths are off and can't get out of sync with state */}
+      {popupBin && (
+        <Popup
+          key={popupBin.id}
+          position={binLatLng(popupBin)}
+          offset={[0, -8]}
+          className={BIN_POPUP_CLASS}
+          closeButton={false}
+          closeOnClick={false}
+          closeOnEscapeKey={false}
+          autoPanPaddingTopLeft={[16, 24]}
+          // room below the card for the pin itself and the attribution line
+          autoPanPaddingBottomRight={[16, 48]}
+        >
+          <div className="relative w-64 font-sans text-base leading-normal">
+            <BinCard bin={popupBin} onClick={() => onOpenDetail(popupBin)} />
+            <button
+              onClick={onClosePopup}
+              className="absolute -top-2 -right-2 w-6 h-6 flex items-center justify-center rounded-full bg-white border border-stone-200 shadow text-stone-400 hover:text-stone-600 text-xs transition-colors before:absolute before:-inset-2"
+              aria-label="Close bin card"
+            >✕</button>
+          </div>
+        </Popup>
+      )}
+    </>
+  )
+}
+
+// base map: openfreemap's positron (free, no key, no limits, osm data), drawn by maplibre
+const VECTOR_STYLE = 'https://tiles.openfreemap.org/styles/positron'
+const VECTOR_CREDIT =
+  '<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> © <a href="https://www.openmaptiles.org/" target="_blank">OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
+const OSM_CREDIT = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+// dotted/dashed clutter: footpaths and their names, rail hatching, admin boundaries
+const HIDDEN_LAYERS = new Set([
+  'highway_path', 'highway-name-path',
+  'railway_dashline', 'railway_transit_dashline', 'railway_service_dashline',
+  'boundary_2', 'boundary_3', 'boundary_disputed',
+])
+
+// positron's data has no names for plain campus buildings, so we bring our own (from osm).
+// maplibre hides labels that would collide; bigger buildings claim their spot first.
+// maplibre zooms run one below leaflet's (512px tiles), so 14.5 here is 15.5 in leaflet:
+// one step in from the whole-campus view
+const BUILDING_NAMES_SOURCE = {
+  type: 'geojson',
+  data: {
+    type: 'FeatureCollection',
+    features: campusBuildings.map(b => ({
+      type: 'Feature',
+      properties: { name: b.name, size: b.size },
+      geometry: { type: 'Point', coordinates: [b.lng, b.lat] },
+    })),
+  },
+}
+const BUILDING_NAMES_LAYER = {
+  id: 'campus-building-names',
+  type: 'symbol',
+  source: 'campusBuildings',
+  minzoom: 14.5,
+  layout: {
+    'text-field': ['get', 'name'],
+    'text-font': ['Noto Sans Regular'], // a font positron's glyph server has
+    'text-size': ['interpolate', ['linear'], ['zoom'], 14.5, 10, 17, 13],
+    'text-max-width': 8,
+    'text-padding': 4,
+    'symbol-sort-key': ['-', ['get', 'size']], // lower key places first
+  },
+  paint: {
+    'text-color': '#57534e', // stone-600
+    'text-halo-color': 'rgba(255, 255, 255, 0.9)',
+    'text-halo-width': 1.5,
+  },
+}
+
+// maplibre + its worker (~420 KB gzipped) are only fetched when map view first opens. if it, the style,
+// or webgl fails, falls back to the plain osm tiles, grayed so the pins still stand out
+function BaseMap() {
+  const map = useMap()
+  const [fallback, setFallback] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    let layer: Layer | undefined
+    const fail = () => {
+      if (layer) map.removeLayer(layer)
+      layer = undefined
+      if (!cancelled) setFallback(true)
+    }
+    Promise.all([
+      import('maplibre-gl'),
+      // maplibre finds its worker next to its own file at runtime, which vite neither
+      // bundles nor keeps in place; ?worker&url makes vite bundle it and hand us the url
+      import('maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'),
+      import('@maplibre/maplibre-gl-leaflet'),
+      import('maplibre-gl/dist/maplibre-gl.css'),
+      fetch(VECTOR_STYLE).then(r => (r.ok ? r.json() : Promise.reject(r.status))),
+    ])
+      .then(([maplibre, { default: workerUrl }, { maplibreGL }, , style]) => {
+        if (cancelled) return
+        maplibre.setWorkerUrl(workerUrl)
+        // hide before first paint rather than after load, so the clutter never flashes
+        for (const l of style.layers) if (HIDDEN_LAYERS.has(l.id)) l.layout = { ...l.layout, visibility: 'none' }
+        style.sources.campusBuildings = BUILDING_NAMES_SOURCE
+        style.layers.push(BUILDING_NAMES_LAYER)
+        layer = maplibreGL({ style, attributionControl: { customAttribution: VECTOR_CREDIT } }).addTo(map)
+        const gl = (layer as ReturnType<typeof maplibreGL>).getMaplibreMap()
+        let loaded = false
+        gl.once('load', () => { loaded = true })
+        gl.on('error', () => { if (!loaded) fail() })
+      })
+      .catch(fail)
+    return () => {
+      cancelled = true
+      if (layer) map.removeLayer(layer)
+    }
+  }, [map])
+
+  return fallback ? (
+    <TileLayer
+      url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+      maxZoom={MAX_ZOOM}
+      attribution={OSM_CREDIT}
+      className="[filter:grayscale(.85)_brightness(1.05)_contrast(.9)]"
+    />
+  ) : null
+}
+
+// the fog sits in its own pane between the base map and the pins, so pins and cards stay sharp
+function CampusFog() {
+  return (
+    <Pane name="campusFog" style={{ zIndex: 450 }}>
+      <ImageOverlay url={fogImage()} bounds={FOG_BOUNDS} />
+    </Pane>
+  )
+}
+
+// fades out while a bin card is open: leaflet stacks pins and popups in one pane,
+// so the legend can't sit between them and would cover the card
+function MapLegend({ hidden }: { hidden: boolean }) {
+  const items: { label: string; hex: string }[] = [
+    { label: statusLabel('ok'), hex: fillHex(0) },
+    { label: statusLabel('warn'), hex: fillHex(WARN_AT) },
+    { label: statusLabel('critical'), hex: fillHex(CRITICAL_AT) },
+    { label: statusLabel('offline'), hex: OFFLINE_HEX },
+  ]
+  return (
+    // top right: bottom corners hold the osm attribution, top left the zoom buttons
+    <div className={`absolute right-2 top-2 z-[1000] max-w-[calc(100%-4rem)] pointer-events-none bg-white/95 rounded-xl border border-stone-200 px-2.5 py-1.5 flex flex-wrap justify-end items-center gap-x-3 gap-y-1 text-[10px] font-medium text-stone-500 transition-opacity ${hidden ? 'opacity-0' : ''}`}>
+      {items.map(i => (
+        <span key={i.label} className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: i.hex }} />
+          {i.label}
+        </span>
+      ))}
+      <span className="flex items-center gap-1.5">
+        <span className="w-3.5 h-3.5 rounded-full border-2 border-stone-400 font-mono text-[8px] font-bold text-forest flex items-center justify-center">2</span>
+        Grouped
+      </span>
+    </div>
+  )
+}
+
+function BinMap(props: BinMapProps) {
+  const { bins, focus } = props
+  // starting view: the bin being jumped to, otherwise fit every pin
+  const [initial] = useState(() => {
+    const bin = focus && bins.find(b => b.id === focus.id)
+    return bin
+      ? { center: binLatLng(bin), zoom: LABEL_ZOOM }
+      : { bounds: latLngBounds(bins.map(binLatLng)), boundsOptions: { padding: [40, 40] as [number, number], maxZoom: LABEL_ZOOM } }
+  })
+
+  return (
+    // isolate keeps leaflet's z-indexes (up to 1000) below the sticky nav and the detail popup
+    <div className="relative isolate h-[60vh] min-h-[320px] max-h-[640px] bg-white rounded-2xl border border-stone-200/80 overflow-hidden">
+      <MapContainer {...initial} maxZoom={MAX_ZOOM} maxBounds={MAP_LIMIT} maxBoundsViscosity={1} className="h-full w-full">
+        <BaseMap />
+        <CampusFog />
+        <BinMapLayers {...props} />
+      </MapContainer>
+      <MapLegend hidden={bins.some(b => b.id === props.selectedId)} />
+    </div>
+  )
+}
+
 // main app
 
 export default function App() {
@@ -371,6 +879,26 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'overview' | 'manage'>('overview')
   const [editingStaff, setEditingStaff] = useState<string | null>(null)
   const [staffList, setStaffList] = useState<StaffMember[]>(STAFF)
+  const [viewMode, setViewMode] = useState<'cards' | 'map'>('cards')
+  // bin whose card is open on the map, highlighted in cards view until the card is closed
+  const [mapBinId, setMapBinId] = useState<string | null>(null)
+  const [mapFocus, setMapFocus] = useState<MapFocus | null>(null)
+  const [scrollReq, setScrollReq] = useState<{ target: 'bins' | 'alerts'; n: number } | null>(null)
+  const binsRef = useRef<HTMLDivElement>(null)
+  const alertsRef = useRef<HTMLDivElement>(null)
+
+  // scroll after render, and only when the target isn't already on screen
+  useEffect(() => {
+    if (!scrollReq) return
+    const el = { bins: binsRef, alerts: alertsRef }[scrollReq.target].current
+    if (!el) return
+    const { top } = el.getBoundingClientRect()
+    if (top < 56 || top > window.innerHeight - 120) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [scrollReq])
+
+  function requestScroll(target: 'bins' | 'alerts') {
+    setScrollReq(prev => ({ target, n: (prev?.n ?? 0) + 1 }))
+  }
 
   // alerts rebuild when the threshold changes
   const alerts = useMemo<Alert[]>(() => {
@@ -427,8 +955,28 @@ export default function App() {
     return bins
   }, [filterZone, filterStatus, sortBy])
 
+  const mapBin = TRIBINS.find(b => b.id === mapBinId) ?? null
+
+  // the picked bin keeps its pin even when the filters hide it
+  const mapBins = useMemo(
+    () => (mapBin && !filteredBins.includes(mapBin) ? [...filteredBins, mapBin] : filteredBins),
+    [filteredBins, mapBin],
+  )
+  const shownCount = viewMode === 'map' ? mapBins.length : filteredBins.length
+
+  function showOnMap(binId: string) {
+    setViewMode('map')
+    setMapBinId(binId)
+    setMapFocus(prev => ({ id: binId, n: (prev?.n ?? 0) + 1 }))
+    requestScroll('bins')
+  }
+
   function dismissAlert(id: string) {
     setDismissedIds(prev => (prev.includes(id) ? prev : [...prev, id]))
+  }
+
+  function clearAllAlerts() {
+    setDismissedIds(prev => [...new Set([...prev, ...visibleAlerts.map(a => a.id)])])
   }
 
   function toggleZoneAssignment(staffId: string, zone: Zone) {
@@ -469,7 +1017,7 @@ export default function App() {
           </div>
 
           {/* alert bell */}
-          <button className="relative p-2 rounded-lg hover:bg-white/10 transition-colors" onClick={() => setActiveTab('overview')}>
+          <button className="relative p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="Alerts" onClick={() => { setActiveTab('overview'); requestScroll('alerts') }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0" />
             </svg>
@@ -543,6 +1091,13 @@ export default function App() {
                     Critical: Collect Now
                   </span>
                   <span className="text-white/40 text-xs font-mono">Updated {fullestBin.lastUpdated}</span>
+                  <button
+                    onClick={() => showOnMap(fullestBin.id)}
+                    className="inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-semibold px-3 py-1.5 rounded-full transition-colors"
+                  >
+                    <MapPinIcon size={12} />
+                    Show on Map
+                  </button>
                 </div>
               </div>
             </section>
@@ -551,9 +1106,17 @@ export default function App() {
             <div className="flex flex-col lg:flex-row gap-6">
 
               {/* left: bins grid */}
-              <div className="flex-1 min-w-0 space-y-4">
+              <div ref={binsRef} className="flex-1 min-w-0 space-y-4 scroll-mt-20">
                 {/* filters */}
                 <div className="flex flex-wrap gap-2 items-center">
+                  <div className="flex items-center bg-white rounded-xl border border-stone-200 p-0.5 text-xs" role="group" aria-label="View">
+                    {(['cards', 'map'] as const).map(mode => (
+                      <button key={mode} onClick={() => { setViewMode(mode); setMapFocus(null) }} aria-pressed={viewMode === mode}
+                        className={`px-3 py-1.5 rounded-[10px] font-medium transition-colors ${viewMode === mode ? 'bg-sage-dark text-forest' : 'text-stone-400 hover:text-stone-600'}`}
+                      >{mode === 'cards' ? 'Cards' : 'Map'}</button>
+                    ))}
+                  </div>
+
                   <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
                     <span className="text-stone-400 font-medium mr-1">Zone:</span>
@@ -589,27 +1152,51 @@ export default function App() {
 
                   <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
                     <span className="text-stone-400 font-medium">Alert at</span>
+                    {/* -/+ look the same in every browser (ipad safari has no number arrows); before: pads the tap area */}
+                    <button
+                      onClick={() => setAlertThreshold(t => Math.max(10, t - 5))}
+                      disabled={alertThreshold <= 10}
+                      aria-label="Lower alert threshold"
+                      className="relative w-4 h-4 flex items-center justify-center font-semibold text-stone-400 hover:text-forest disabled:text-stone-200 transition-colors before:absolute before:-inset-x-1.5 before:-inset-y-3.5"
+                    >−</button>
                     <input
                       type="number" min={10} max={100} step={5} value={alertThreshold}
                       onChange={e => setAlertThreshold(Math.min(100, Math.max(10, Number(e.target.value) || 0)))}
-                      className="w-12 bg-transparent font-medium text-forest outline-none"
+                      aria-label="Alert threshold"
+                      className="w-7 text-center bg-transparent font-medium text-forest outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                     />
                     <span className="text-stone-400 font-medium">%</span>
+                    <button
+                      onClick={() => setAlertThreshold(t => Math.min(100, t + 5))}
+                      disabled={alertThreshold >= 100}
+                      aria-label="Raise alert threshold"
+                      className="relative w-4 h-4 flex items-center justify-center font-semibold text-stone-400 hover:text-forest disabled:text-stone-200 transition-colors before:absolute before:-inset-x-1.5 before:-inset-y-3.5"
+                    >+</button>
                   </div>
 
                   <span className="ml-auto text-xs text-stone-400 font-mono">{filteredBins.length} bin{filteredBins.length !== 1 ? 's' : ''}</span>
                 </div>
 
-                {/* grid */}
-                {filteredBins.length === 0 ? (
+                {/* grid or map */}
+                {shownCount === 0 ? (
                   <div className="py-16 text-center text-stone-400">
                     <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-2"><path d="M4 7h16M9 7V4h6v3M10 11v6M14 11v6M6 7l1 13h10l1-13"/></svg>
                     <p className="text-sm">No bins match these filters.</p>
                   </div>
+                ) : viewMode === 'map' ? (
+                  <BinMap
+                    bins={mapBins}
+                    fitKey={filteredBins.map(b => b.id).join()}
+                    selectedId={mapBinId}
+                    focus={mapFocus}
+                    onSelect={setMapBinId}
+                    onClosePopup={() => setMapBinId(null)}
+                    onOpenDetail={setSelectedBin}
+                  />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                     {filteredBins.map(bin => (
-                      <BinCard key={bin.id} bin={bin} onClick={() => setSelectedBin(bin)} />
+                      <BinCard key={bin.id} bin={bin} onClick={() => setSelectedBin(bin)} onShowOnMap={() => showOnMap(bin.id)} highlighted={bin.id === mapBinId} />
                     ))}
                   </div>
                 )}
@@ -617,10 +1204,16 @@ export default function App() {
 
               {/* right: alerts panel */}
               <aside className="w-full lg:w-72 xl:w-80 shrink-0 space-y-3">
-                <div className="flex items-center justify-between">
+                <div ref={alertsRef} className="flex items-center justify-between scroll-mt-20">
                   <h2 className="text-xs uppercase tracking-widest text-stone-400 font-semibold">Alerts</h2>
                   {unreadCount > 0 && (
-                    <span className="text-[10px] bg-red-100 text-red-700 font-semibold px-2 py-0.5 rounded-full">{unreadCount} active</span>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={clearAllAlerts}
+                        className="relative text-[10px] font-semibold text-stone-400 hover:text-forest transition-colors before:absolute before:-inset-x-2 before:-inset-y-3"
+                      >Clear all</button>
+                      <span className="text-[10px] bg-red-100 text-red-700 font-semibold px-2 py-0.5 rounded-full">{unreadCount} active</span>
+                    </div>
                   )}
                 </div>
 
@@ -631,7 +1224,7 @@ export default function App() {
                       <p className="text-xs">No active alerts</p>
                     </div>
                   ) : visibleAlerts.map(a => (
-                    <AlertItem key={a.id} alert={a} onDismiss={dismissAlert} />
+                    <AlertItem key={a.id} alert={a} onDismiss={dismissAlert} onSelect={alert => showOnMap(alert.binId)} />
                   ))}
                 </div>
 
