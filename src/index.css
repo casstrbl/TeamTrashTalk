@@ -6,28 +6,45 @@
   --font-sans: 'Outfit', system-ui, sans-serif;
   --font-mono: 'DM Mono', 'Courier New', monospace;
 
-  --color-forest: #1a2e1c;
-  --color-forest-light: #2d4a30;
-  --color-sage: #f0f4ee;
-  --color-sage-dark: #dde7d9;
-  --color-mint: #52b788;
-  --color-mint-dark: #2d6a4f;
-  --color-status-ok: #40916c;
-  --color-status-warn: #e9a23b;
-  --color-status-critical: #d9534f;
-  --color-status-offline: #8b9a85;
+  /* palette */
+  --color-pine: #0F2E23; /* nav, headlines, hero tile, primary buttons */
+  --color-ivory: #F4F1DE; /* page background */
+  --color-ivory-dark: #E6E1C5;
+  --color-teal: #1B5B65; /* info, links, map, selected states */
+  --color-olive: #798F53; /* calm, "all good"; too light for text */
+  --color-rose: #C88582; /* only for things that need attention; too light for text */
+
+  /* older names the app already uses, remapped onto the palette */
+  --color-forest: #0F2E23; /* pine */
+  --color-forest-light: #1E4A3A;
+  --color-sage: #F4F1DE; /* ivory */
+  --color-sage-dark: #E6E1C5; /* ivory-dark */
+  --color-mint: #1B5B65; /* teal */
+  --color-mint-dark: #1B5B65; /* teal */
+
+  /* status: dots, pins, gauges, badges */
+  --color-status-ok: #4E8B5F;
+  --color-status-warn: #D4A13A;
+  --color-status-critical: #B4463F;
+  --color-status-offline: #9A9A8E;
+  /* darker shades for status text: the status colors themselves are too light
+     for small text (warning gold is ~2.3:1 on white); these are 5.4:1 or better */
+  --color-status-ok-ink: #2F5E3D;
+  --color-status-warn-ink: #7A5A12;
+  --color-status-critical-ink: #8E332D;
+  --color-status-offline-ink: #5F5F55;
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #c3d4be transparent;
+  scrollbar-color: #d6d0b4 transparent;
 }
 *::-webkit-scrollbar { width: 4px; height: 4px; }
 *::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb { background: #c3d4be; border-radius: 99px; }
+*::-webkit-scrollbar-thumb { background: #d6d0b4; border-radius: 99px; }
 
 body {
   font-family: var(--font-sans);
-  background-color: #f0f4ee;
-  color: #1a2e1c;
+  background-color: #F4F1DE;
+  color: #0F2E23;
 }
