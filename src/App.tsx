@@ -18,8 +18,9 @@ const LABEL_ZOOM = 18
 const MAX_ZOOM = 19
 // apple's minimum tap size, every pin gets at least this much hit area
 const PIN_TAP = 44
-const OFFLINE_HEX = '#a8a29e'
-const MINT_HEX = '#52b788'
+// hex copies of index.css colors, for places tailwind classes can't reach (svg, map, canvas)
+const OFFLINE_HEX = '#9A9A8E' // status-offline
+const TEAL_HEX = '#1B5B65' // teal: selected pin ring, building names
 
 // types
 
@@ -163,10 +164,10 @@ function binStatus(bin: Tribin): Status {
 
 function statusBg(status: Status) {
   return {
-    ok: 'bg-emerald-100 text-emerald-800',
-    warn: 'bg-amber-100 text-amber-800',
-    critical: 'bg-red-100 text-red-800',
-    offline: 'bg-stone-100 text-stone-500',
+    ok: 'bg-status-ok/15 text-status-ok-ink',
+    warn: 'bg-status-warn/20 text-status-warn-ink',
+    critical: 'bg-status-critical/15 text-status-critical-ink',
+    offline: 'bg-status-offline/20 text-status-offline-ink',
   }[status]
 }
 
@@ -174,23 +175,24 @@ function statusLabel(status: Status) {
   return { ok: 'Good', warn: 'Warning', critical: 'Critical', offline: 'Offline' }[status]
 }
 
-// hex fill color for gauges
+// hex fill color for gauges and pins (status-critical / -warn / -ok)
 function fillHex(fill: number) {
-  if (fill >= CRITICAL_AT) return '#ef4444'
-  if (fill >= WARN_AT) return '#f59e0b'
-  return '#10b981'
+  if (fill >= CRITICAL_AT) return '#B4463F'
+  if (fill >= WARN_AT) return '#D4A13A'
+  return '#4E8B5F'
 }
 
 // tailwind bg class for bars
 function fillBarColor(fill: number) {
-  if (fill >= CRITICAL_AT) return 'bg-red-500'
-  if (fill >= WARN_AT) return 'bg-amber-400'
-  return 'bg-emerald-500'
+  if (fill >= CRITICAL_AT) return 'bg-status-critical'
+  if (fill >= WARN_AT) return 'bg-status-warn'
+  return 'bg-status-ok'
 }
 
-// calrecycle colors: landfill grey, recycling blue, compost green
+// calrecycle's grey / blue / green, in palette shades: landfill dark grey,
+// recycling teal, compost olive. none of them is a status color
 function compartmentColor(label: Stream) {
-  return { Landfill: '#4b5563', Recycling: '#2563eb', Compost: '#16a34a' }[label]
+  return { Landfill: '#4A4A42', Recycling: '#1B5B65', Compost: '#798F53' }[label]
 }
 
 // enter/space on a div acting as a button
@@ -219,7 +221,7 @@ const PIN_SHADOW = '0 0 0 1px rgb(0 0 0 / .18), 0 2px 5px rgb(0 0 0 / .4)'
 
 function binIcon(bin: Tribin, labeled: boolean, selected: boolean) {
   const hex = pinHex(bin)
-  const ring = selected ? `, 0 0 0 3px ${MINT_HEX}` : ''
+  const ring = selected ? `, 0 0 0 3px ${TEAL_HEX}` : ''
   const body = labeled
     ? `<span class="flex items-center gap-1 bg-white rounded-full pl-1.5 pr-2 py-0.5 font-mono text-[11px] leading-none font-bold text-forest ${selected ? 'scale-110' : ''}" style="border:2px solid ${hex};box-shadow:${PIN_SHADOW}${ring}"><span class="w-2 h-2 rounded-full" style="background:${hex}"></span>${maxFill(bin)}%</span>`
     : `<span class="block rounded-full border-[2.5px] border-white ${selected ? 'w-5 h-5' : 'w-4 h-4'}" style="background:${hex};box-shadow:${PIN_SHADOW}${ring}"></span>`
@@ -329,7 +331,7 @@ function fogImage() {
   const r = Math.max(1, Math.round((Math.sqrt(4 * sigma * sigma + 1) - 1) / 2))
   for (let pass = 0; pass < 3; pass++) boxBlur(inside, w, h, r)
   for (let i = 0; i < inside.length; i++) {
-    img.data.set([240, 244, 238, Math.round((1 - inside[i]) * FOG_OPACITY * 255)], i * 4) // sage
+    img.data.set([244, 241, 222, Math.round((1 - inside[i]) * FOG_OPACITY * 255)], i * 4) // ivory
   }
   ctx.putImageData(img, 0, 0)
   return (fogUrl = canvas.toDataURL())
@@ -357,7 +359,7 @@ function RingGauge({ fill, size = 56 }: { fill: number; size?: number }) {
   const offset = circ - (fill / 100) * circ
   return (
     <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#e5e7eb" strokeWidth={6} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#E6E1C5" strokeWidth={6} />
       <circle
         cx={size / 2} cy={size / 2} r={r} fill="none"
         stroke={fillHex(fill)} strokeWidth={6}
@@ -370,7 +372,7 @@ function RingGauge({ fill, size = 56 }: { fill: number; size?: number }) {
 }
 
 function BatteryIcon({ level }: { level: number }) {
-  const color = level <= 20 ? 'text-red-500' : level <= 40 ? 'text-amber-500' : 'text-emerald-600'
+  const color = level <= 20 ? 'text-status-critical-ink' : level <= 40 ? 'text-status-warn-ink' : 'text-status-ok-ink'
   return (
     <span className={`font-mono text-xs ${color}`} title={`Battery: ${level}%`}>
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="inline-block align-[-1px] mr-0.5">
@@ -422,7 +424,7 @@ function BinCard({ bin, onClick, onShowOnMap, highlighted = false }: {
       tabIndex={0}
       onClick={onClick}
       onKeyDown={onActivate(onClick)}
-      className={`group text-left bg-white rounded-2xl border p-4 hover:border-emerald-300 hover:shadow-lg hover:shadow-emerald-900/5 transition-all duration-200 cursor-pointer ${highlighted ? 'border-mint ring-2 ring-mint/30' : 'border-stone-200/80'}`}
+      className={`group text-left bg-white rounded-2xl border p-4 hover:border-teal/40 hover:shadow-lg hover:shadow-pine/5 transition-all duration-200 cursor-pointer ${highlighted ? 'border-mint ring-2 ring-mint/30' : 'border-stone-200/80'}`}
     >
       <div className="flex items-start justify-between mb-3">
         <div>
@@ -475,8 +477,9 @@ function BinCard({ bin, onClick, onShowOnMap, highlighted = false }: {
 }
 
 function AlertItem({ alert, onDismiss, onSelect }: { alert: Alert; onDismiss: (id: string) => void; onSelect: (alert: Alert) => void }) {
-  const dot = { critical: 'bg-red-500', warn: 'bg-amber-400', info: 'bg-blue-400' }[alert.severity]
-  const bg = { critical: 'border-l-red-500 bg-red-50', warn: 'border-l-amber-400 bg-amber-50', info: 'border-l-blue-400 bg-blue-50' }[alert.severity]
+  // rose card = needs attention; the stripe and dot carry the severity
+  const dot = { critical: 'bg-status-critical', warn: 'bg-status-warn', info: 'bg-teal' }[alert.severity]
+  const bg = { critical: 'border-l-status-critical bg-rose/15', warn: 'border-l-status-warn bg-rose/15', info: 'border-l-teal bg-teal/10' }[alert.severity]
   return (
     <div
       role="button"
@@ -554,7 +557,7 @@ function BinDetailModal({ bin, onClose }: { bin: Tribin; onClose: () => void }) 
         <div className="grid grid-cols-2 gap-3 text-xs border-t border-stone-100 pt-4">
           <div>
             <p className="text-stone-400 uppercase tracking-wider text-[10px]">Sensor</p>
-            <p className={`font-medium mt-0.5 capitalize ${bin.sensorStatus === 'online' ? 'text-emerald-600' : 'text-red-500'}`}>{bin.sensorStatus}</p>
+            <p className={`font-medium mt-0.5 capitalize ${bin.sensorStatus === 'online' ? 'text-status-ok-ink' : 'text-status-critical-ink'}`}>{bin.sensorStatus}</p>
           </div>
           <div>
             <p className="text-stone-400 uppercase tracking-wider text-[10px]">Battery</p>
@@ -714,6 +717,13 @@ const VECTOR_CREDIT =
   '<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> © <a href="https://www.openmaptiles.org/" target="_blank">OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
 const OSM_CREDIT = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 // dotted/dashed clutter: footpaths and their names, rail hatching, admin boundaries
+// positron's gray water and parks, tinted toward the palette: pale teal, pale olive
+const PALETTE_PAINT: Record<string, Record<string, string>> = {
+  water: { 'fill-color': '#C6D6D8' },
+  waterway: { 'line-color': '#C6D6D8' },
+  park: { 'fill-color': '#E2E6D9' },
+  landcover_wood: { 'fill-color': '#E2E6D9' },
+}
 const HIDDEN_LAYERS = new Set([
   'highway_path', 'highway-name-path',
   'railway_dashline', 'railway_transit_dashline', 'railway_service_dashline',
@@ -749,7 +759,7 @@ const BUILDING_NAMES_LAYER = {
     'symbol-sort-key': ['-', ['get', 'size']], // lower key places first
   },
   paint: {
-    'text-color': '#57534e', // stone-600
+    'text-color': TEAL_HEX,
     'text-halo-color': 'rgba(255, 255, 255, 0.9)',
     'text-halo-width': 1.5,
   },
@@ -782,7 +792,10 @@ function BaseMap() {
         if (cancelled) return
         maplibre.setWorkerUrl(workerUrl)
         // hide before first paint rather than after load, so the clutter never flashes
-        for (const l of style.layers) if (HIDDEN_LAYERS.has(l.id)) l.layout = { ...l.layout, visibility: 'none' }
+        for (const l of style.layers) {
+          if (HIDDEN_LAYERS.has(l.id)) l.layout = { ...l.layout, visibility: 'none' }
+          if (l.id in PALETTE_PAINT) l.paint = { ...l.paint, ...PALETTE_PAINT[l.id] }
+        }
         style.sources.campusBuildings = BUILDING_NAMES_SOURCE
         style.layers.push(BUILDING_NAMES_LAYER)
         layer = maplibreGL({ style, attributionControl: { customAttribution: VECTOR_CREDIT } }).addTo(map)
@@ -1009,9 +1022,9 @@ export default function App() {
         <div className="flex items-center gap-3">
           {/* role toggle, demo only */}
           <div className="flex items-center gap-1.5 bg-white/10 rounded-full px-3 py-1.5 cursor-pointer" onClick={() => setCurrentRole(r => r === 'editor' ? 'viewer' : 'editor')}>
-            <div className={`w-1.5 h-1.5 rounded-full ${currentRole === 'editor' ? 'bg-mint' : 'bg-amber-400'}`} />
+            <div className={`w-1.5 h-1.5 rounded-full ${currentRole === 'editor' ? 'bg-olive' : 'bg-ivory/50'}`} />
             <span className="text-xs font-medium">{currentRole === 'editor' ? 'Person 1' : 'Person 2'}</span>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wider ${currentRole === 'editor' ? 'bg-mint/20 text-mint' : 'bg-amber-400/20 text-amber-300'}`}>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wider ${currentRole === 'editor' ? 'bg-teal text-ivory' : 'bg-ivory/15 text-ivory/80'}`}>
               {currentRole}
             </span>
           </div>
@@ -1022,14 +1035,14 @@ export default function App() {
               <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0" />
             </svg>
             {unreadCount > 0 && (
-              <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 rounded-full text-[9px] font-bold flex items-center justify-center">{unreadCount}</span>
+              <span className="absolute top-1 right-1 w-4 h-4 bg-rose text-pine rounded-full text-[9px] font-bold flex items-center justify-center">{unreadCount}</span>
             )}
           </button>
 
           <span className="hidden sm:block text-white/20 text-sm">|</span>
 
           <div className="hidden sm:flex items-center gap-2 text-xs text-white/50">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-status-ok animate-pulse" />
             Live
           </div>
         </div>
@@ -1061,13 +1074,13 @@ export default function App() {
               <p className="text-[11px] uppercase tracking-widest text-stone-400 font-semibold mb-2">Needs Immediate Attention</p>
               <div className="relative overflow-hidden rounded-2xl bg-forest text-white px-6 py-5 flex flex-col sm:flex-row items-start sm:items-center gap-5 shadow-xl shadow-forest/20">
                 {/* bg texture */}
-                <div className="absolute inset-0 opacity-5 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at 80% 50%, #52b788 0%, transparent 60%)' }} />
+                <div className="absolute inset-0 opacity-5 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at 80% 50%, #798F53 0%, transparent 60%)' }} />
 
                 <div className="flex items-center gap-4">
                   <div className="relative shrink-0">
                     <RingGauge fill={maxFill(fullestBin)} size={80} />
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <span className="font-mono font-bold text-xl text-red-400">{maxFill(fullestBin)}%</span>
+                      <span className="font-mono font-bold text-xl text-rose">{maxFill(fullestBin)}%</span>
                     </div>
                   </div>
                   <div>
@@ -1078,7 +1091,7 @@ export default function App() {
                     <div className="mt-2 flex flex-wrap gap-2">
                       {fullestBin.compartments.map(c => (
                         <span key={c.label} className="text-[11px] font-mono bg-white/10 rounded-md px-2 py-0.5">
-                          {c.label} <span className={c.fill >= CRITICAL_AT ? 'text-red-400' : c.fill >= WARN_AT ? 'text-amber-400' : 'text-emerald-400'}>{c.fill}%</span>
+                          {c.label} <span className={c.fill >= CRITICAL_AT ? 'text-rose' : c.fill >= WARN_AT ? 'text-status-warn' : 'text-ivory'}>{c.fill}%</span>
                         </span>
                       ))}
                     </div>
@@ -1086,7 +1099,7 @@ export default function App() {
                 </div>
 
                 <div className="sm:ml-auto flex flex-col items-start sm:items-end gap-2">
-                  <span className="inline-flex items-center gap-1.5 bg-red-500/90 text-white text-xs font-semibold px-3 py-1.5 rounded-full">
+                  <span className="inline-flex items-center gap-1.5 bg-status-critical text-white text-xs font-semibold px-3 py-1.5 rounded-full">
                     <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                     Critical: Collect Now
                   </span>
@@ -1112,7 +1125,7 @@ export default function App() {
                   <div className="flex items-center bg-white rounded-xl border border-stone-200 p-0.5 text-xs" role="group" aria-label="View">
                     {(['cards', 'map'] as const).map(mode => (
                       <button key={mode} onClick={() => { setViewMode(mode); setMapFocus(null) }} aria-pressed={viewMode === mode}
-                        className={`px-3 py-1.5 rounded-[10px] font-medium transition-colors ${viewMode === mode ? 'bg-sage-dark text-forest' : 'text-stone-400 hover:text-stone-600'}`}
+                        className={`px-3 py-1.5 rounded-[10px] font-medium transition-colors ${viewMode === mode ? 'bg-teal text-ivory' :'text-stone-400 hover:text-stone-600'}`}
                       >{mode === 'cards' ? 'Cards' : 'Map'}</button>
                     ))}
                   </div>
@@ -1212,7 +1225,7 @@ export default function App() {
                         onClick={clearAllAlerts}
                         className="relative text-[10px] font-semibold text-stone-400 hover:text-forest transition-colors before:absolute before:-inset-x-2 before:-inset-y-3"
                       >Clear all</button>
-                      <span className="text-[10px] bg-red-100 text-red-700 font-semibold px-2 py-0.5 rounded-full">{unreadCount} active</span>
+                      <span className="text-[10px] bg-rose/25 text-pine font-semibold px-2 py-0.5 rounded-full">{unreadCount} active</span>
                     </div>
                   )}
                 </div>
@@ -1234,9 +1247,9 @@ export default function App() {
                   <div className="grid grid-cols-2 gap-3">
                     {[
                       { label: 'Total Bins', value: TRIBINS.length, color: 'text-forest' },
-                      { label: 'Critical', value: TRIBINS.filter(b => binStatus(b) === 'critical').length, color: 'text-red-600' },
-                      { label: 'Warning', value: TRIBINS.filter(b => binStatus(b) === 'warn').length, color: 'text-amber-600' },
-                      { label: 'Offline', value: TRIBINS.filter(b => b.sensorStatus === 'offline').length, color: 'text-stone-400' },
+                      { label: 'Critical', value: TRIBINS.filter(b => binStatus(b) === 'critical').length, color: 'text-status-critical-ink' },
+                      { label: 'Warning', value: TRIBINS.filter(b => binStatus(b) === 'warn').length, color: 'text-status-warn-ink' },
+                      { label: 'Offline', value: TRIBINS.filter(b => b.sensorStatus === 'offline').length, color: 'text-status-offline-ink' },
                     ].map(s => (
                       <div key={s.label} className="text-center py-2 bg-sage rounded-xl">
                         <p className={`font-mono font-bold text-xl ${s.color}`}>{s.value}</p>
@@ -1252,7 +1265,7 @@ export default function App() {
                       </span>
                     </div>
                     <div className="h-2 bg-stone-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${Math.round(TRIBINS.reduce((s, b) => s + avgFill(b), 0) / TRIBINS.length)}%` }} />
+                      <div className="h-full bg-olive rounded-full" style={{ width: `${Math.round(TRIBINS.reduce((s, b) => s + avgFill(b), 0) / TRIBINS.length)}%` }} />
                     </div>
                   </div>
                 </div>
