@@ -1288,6 +1288,49 @@ function ComingSoon({ title, icon, text }: { title: string; icon: keyof typeof I
   )
 }
 
+// role and zone controls for one person, shared by the admin table and the phone cards.
+// nobody can change their own role, and only editors reach admin, so an editor always remains
+function StaffEditor({ member, isSelf, onToggleRole, onToggleZone }: {
+  member: StaffMember
+  isSelf: boolean
+  onToggleRole: () => void
+  onToggleZone: (zone: Zone) => void
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="text-xs font-semibold text-stone-500">Role:</span>
+        <button
+          onClick={onToggleRole}
+          disabled={isSelf}
+          className="text-xs min-h-11 px-4 rounded-lg border border-stone-200 bg-white hover:border-mint transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-stone-200"
+        >
+          Toggle → {member.role === 'editor' ? 'viewer' : 'editor'}
+        </button>
+        {isSelf && <span className="text-xs text-stone-500">You can't change your own role. Ask another editor.</span>}
+      </div>
+      <div>
+        <p className="text-xs font-semibold text-stone-500 mb-2">Zone assignments:</p>
+        <div className="flex flex-wrap gap-2">
+          {ALL_ZONES.map(zone => (
+            <button
+              key={zone}
+              onClick={() => onToggleZone(zone)}
+              className={`text-xs min-h-11 px-4 rounded-lg border transition-colors font-medium ${
+                member.zones.includes(zone)
+                  ? 'bg-mint/20 border-mint text-mint-dark'
+                  : 'bg-white border-stone-200 text-stone-400 hover:border-stone-300'
+              }`}
+            >
+              {zone}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // a viewer with no zones assigned sees this instead of bins
 function NoZonesNotice() {
   return (
@@ -1546,6 +1589,7 @@ export default function App() {
   }
 
   function toggleStaffRole(staffId: string) {
+    if (staffId === currentUserId) return // can't change your own role (the button is disabled too)
     setStaffList(prev => prev.map(s =>
       s.id === staffId ? { ...s, role: s.role === 'editor' ? 'viewer' : 'editor' } : s
     ))
@@ -1774,22 +1818,70 @@ export default function App() {
           {/* manage tab */}
           {page === 'admin' && currentRole === 'editor' && (
             <div className="space-y-5">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h2 className="font-display text-2xl text-forest">Staff &amp; Zone Management</h2>
                   <p className="text-sm text-stone-400 mt-0.5">Manage roles and zone assignments for your team.</p>
                 </div>
-                <span className="text-xs bg-mint/20 text-mint-dark px-3 py-1.5 rounded-full font-semibold">Editors only</span>
+                <span className="text-xs bg-mint/20 text-mint-dark px-3 py-1.5 rounded-full font-semibold whitespace-nowrap">Editors only</span>
               </div>
 
-              <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
+              {/* phones: one card per person (the table doesn't fit) */}
+              <div className="md:hidden space-y-3">
+                {staffList.map(member => {
+                  const editing = editingStaff === member.id
+                  return (
+                    <div key={member.id} className="bg-white rounded-2xl border border-stone-200 p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-mint/20 flex items-center justify-center text-xs font-bold text-mint-dark shrink-0">
+                          {member.name.split(' ').map(n => n[0]).join('')}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-forest">{member.name}{member.id === currentUserId && <span className="text-stone-400 font-normal"> (you)</span>}</p>
+                          <p className="text-stone-400 font-mono text-xs truncate">{member.email}</p>
+                        </div>
+                        <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${member.role === 'editor' ? 'bg-mint/20 text-mint-dark' : 'bg-stone-100 text-stone-500'}`}>
+                          {member.role}
+                        </span>
+                      </div>
+                      {!editing && (
+                        <div className="flex flex-wrap gap-1 mt-3">
+                          {member.zones.length === 0
+                            ? <span className="text-xs text-stone-400">No zones</span>
+                            : member.zones.map(z => <span key={z} className="text-[10px] bg-sage-dark text-stone-600 px-2 py-0.5 rounded-md">{z}</span>)}
+                        </div>
+                      )}
+                      {editing && (
+                        <div className="mt-4 pt-4 border-t border-stone-100">
+                          <StaffEditor
+                            member={member}
+                            isSelf={member.id === currentUserId}
+                            onToggleRole={() => toggleStaffRole(member.id)}
+                            onToggleZone={zone => toggleZoneAssignment(member.id, zone)}
+                          />
+                        </div>
+                      )}
+                      <button
+                        onClick={() => setEditingStaff(editing ? null : member.id)}
+                        aria-label={`${editing ? 'Done editing' : 'Edit'} ${member.name}`}
+                        className="mt-3 w-full min-h-11 rounded-xl border border-stone-200 text-sm font-semibold text-forest hover:border-mint transition-colors"
+                      >
+                        {editing ? 'Done' : 'Edit'}
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* ipad and up: the table */}
+              <div className="hidden md:block bg-white rounded-2xl border border-stone-200 overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-stone-100 bg-sage">
                       <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Name</th>
                       <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Email</th>
                       <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Role</th>
-                      <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold hidden md:table-cell">Zones</th>
+                      <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Zones</th>
                       <th className="px-5 py-3" />
                     </tr>
                   </thead>
@@ -1802,7 +1894,7 @@ export default function App() {
                               <div className="w-7 h-7 rounded-full bg-mint/20 flex items-center justify-center text-xs font-bold text-mint-dark">
                                 {member.name.split(' ').map(n => n[0]).join('')}
                               </div>
-                              <span className="font-medium text-forest">{member.name}</span>
+                              <span className="font-medium text-forest">{member.name}{member.id === currentUserId && <span className="text-stone-400 font-normal"> (you)</span>}</span>
                             </div>
                           </td>
                           <td className="px-5 py-3.5 text-stone-400 font-mono text-xs">{member.email}</td>
@@ -1811,17 +1903,19 @@ export default function App() {
                               {member.role}
                             </span>
                           </td>
-                          <td className="px-5 py-3.5 hidden md:table-cell">
+                          <td className="px-5 py-3.5">
                             <div className="flex flex-wrap gap-1">
                               {member.zones.map(z => (
                                 <span key={z} className="text-[10px] bg-sage-dark text-stone-600 px-2 py-0.5 rounded-md">{z}</span>
                               ))}
                             </div>
                           </td>
-                          <td className="px-5 py-3.5 text-right">
+                          <td className="px-5 py-1 text-right">
+                            {/* min-h-11: a 44px tap area around the small text */}
                             <button
                               onClick={() => setEditingStaff(editingStaff === member.id ? null : member.id)}
-                              className="text-xs text-stone-400 hover:text-forest transition-colors font-medium"
+                              aria-label={`${editingStaff === member.id ? 'Done editing' : 'Edit'} ${member.name}`}
+                              className="min-h-11 px-3 -mr-3 text-xs text-stone-400 hover:text-forest transition-colors font-medium"
                             >
                               {editingStaff === member.id ? 'Done' : 'Edit'}
                             </button>
@@ -1830,35 +1924,12 @@ export default function App() {
                         {editingStaff === member.id && (
                           <tr key={`${member.id}-edit`} className="bg-sage/40">
                             <td colSpan={5} className="px-5 py-4">
-                              <div className="space-y-3">
-                                <div className="flex items-center gap-3">
-                                  <span className="text-xs font-semibold text-stone-500">Role:</span>
-                                  <button
-                                    onClick={() => toggleStaffRole(member.id)}
-                                    className="text-xs px-3 py-1.5 rounded-lg border border-stone-200 bg-white hover:border-mint transition-colors font-medium"
-                                  >
-                                    Toggle → {member.role === 'editor' ? 'viewer' : 'editor'}
-                                  </button>
-                                </div>
-                                <div>
-                                  <p className="text-xs font-semibold text-stone-500 mb-2">Zone assignments:</p>
-                                  <div className="flex flex-wrap gap-2">
-                                    {ALL_ZONES.map(zone => (
-                                      <button
-                                        key={zone}
-                                        onClick={() => toggleZoneAssignment(member.id, zone)}
-                                        className={`text-xs px-3 py-1.5 rounded-lg border transition-colors font-medium ${
-                                          member.zones.includes(zone)
-                                            ? 'bg-mint/20 border-mint text-mint-dark'
-                                            : 'bg-white border-stone-200 text-stone-400 hover:border-stone-300'
-                                        }`}
-                                      >
-                                        {zone}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              </div>
+                              <StaffEditor
+                                member={member}
+                                isSelf={member.id === currentUserId}
+                                onToggleRole={() => toggleStaffRole(member.id)}
+                                onToggleZone={zone => toggleZoneAssignment(member.id, zone)}
+                              />
                             </td>
                           </tr>
                         )}
