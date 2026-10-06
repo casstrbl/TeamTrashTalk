@@ -26,14 +26,13 @@ public class SensorService {
      */
     public void processReading(SensorReading reading, Sensor sensor, Bin bin) {
         if (reading.getSensorID() == sensor.getSensorID()
-                && sensor.getBinID() == bin.getBinID()
                 && sensor.isActive()) {
 
             // Temporary behavior:
             // The reading value is currently treated as waste height.
             // For ultrasonic sensors, this will later need to be converted
             // from sensor-to-trash distance into actual waste height/fullness.
-            bin.setWasteHeight(reading.getValue());
+            bin.setWasteHeight(reading);
         }
     }
 }
