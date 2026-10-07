@@ -17,8 +17,14 @@ class SensorServiceTest {
 		// Create a recycling bin
 		Bin bin = new Bin(1, "Library", Bin.BinType.RECYCLING);
 
-		// Create an active ultrasonic sensor assigned to that bin
-		Sensor sensor = new Sensor(101, 1, Sensor.SensorType.ULTRASONIC);
+		// Create an active ultrasonic sensor
+		Sensor sensor = new Sensor(
+				101,
+				Sensor.SensorType.ULTRASONIC
+		);
+
+        // Link the sensor to the recycling bin being tested
+		sensor.assignToBin(bin);
 
 		// Simulate a sensor reading
 		SensorReading reading = new SensorReading(101, 25.5, "cm");
