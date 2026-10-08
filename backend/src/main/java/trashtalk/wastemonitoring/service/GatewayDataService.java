@@ -3,6 +3,7 @@ package main.java.trashtalk.wastemonitoring.service;
 import main.java.trashtalk.wastemonitoring.model.Bin;
 import main.java.trashtalk.wastemonitoring.model.Sensor;
 import main.java.trashtalk.wastemonitoring.model.SensorReading;
+import main.java.trashtalk.wastemonitoring.dto.SensorReadingRequest;
 
 /**
  * Handles sensor data coming from a gateway or simulated gateway source.
@@ -18,6 +19,7 @@ import main.java.trashtalk.wastemonitoring.model.SensorReading;
  * - Validate incoming gateway payloads.
  * - Add error handling for unknown sensors or bins.
  */
+
 public class GatewayDataService {
 
     private SensorService sensorService;
@@ -37,5 +39,26 @@ public class GatewayDataService {
                 new SensorReading(sensorID, value, unit);
 
         sensorService.processReading(reading, sensor, bin);
+    }
+    /**
+     * Receives sensor data using the generalized API request format.
+     *
+     * @param request incoming sensor reading data
+     * @param sensor sensor associated with the reading
+     * @param bin bin assigned to the sensor
+     */
+    public void receiveReading(
+            SensorReadingRequest request,
+            Sensor sensor,
+            Bin bin) {
+
+        // Reuse the existing reading flow with values from the request objec
+        receiveReading(
+                request.getSensorID(),
+                request.getValue(),
+                request.getUnit(),
+                sensor,
+                bin
+        );
     }
 }
