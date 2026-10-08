@@ -4,6 +4,7 @@ import main.java.trashtalk.wastemonitoring.model.Bin;
 import main.java.trashtalk.wastemonitoring.model.Bin.BinStatus;
 
 public class BinService {
+	
 	/**
 	 * Calculates the percentage of the bin that is filled with waste.
 	 * 
@@ -14,7 +15,6 @@ public class BinService {
 		percentFull = (Math.round(percentFull));	// Round the percentage to the nearest whole number
 		return percentFull;
 	}
-	
 	
 	
 	/**

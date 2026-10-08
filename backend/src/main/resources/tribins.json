@@ -1,0 +1,110 @@
+[
+	{
+		"triBinID": 2,
+		"zone": "",
+		"location": "Modoc Hall Back Door",
+		"binCoordinatesX": -121.4194873,
+		"binCoordinatesY": 38.55322685,
+		"bins": [
+			{
+				"binID": 101,
+				"triBinID": 2,
+				"binType": "LANDFILL",
+				"wasteHeight": 0
+			},
+			{
+				"binID": 102,
+				"triBinID": 2,
+				"binType": "RECYCLING",
+				"wasteHeight": 0
+			},
+			{
+				"binID": 103,
+				"triBinID": 2,
+				"binType": "COMPOST",
+				"wasteHeight": 0
+			}
+		]
+	},
+	{
+		"triBinID": 4,
+		"zone": "",
+		"location": "Modoc Hall back patio",
+		"binCoordinatesX": -121.4192943,
+		"binCoordinatesY": 38.55335976,
+		"bins": [
+			{
+				"binID": 401,
+				"triBinID": 4,
+				"binType": "LANDFILL",
+				"wasteHeight": 0
+			},
+			{
+				"binID": 402,
+				"triBinID": 4,
+				"binType": "RECYCLING",
+				"wasteHeight": 0
+			},
+			{
+				"binID": 403,
+				"triBinID": 4,
+				"binType": "COMPOST",
+				"wasteHeight": 0
+			}
+		]
+	},
+	{
+		"triBinID": 7,
+		"zone": "",
+		"location": "In front of doorway of Modoc Hall",
+		"binCoordinatesX": -121.4191379,
+		"binCoordinatesY": 38.55295902,
+		"bins": [
+			{
+				"binID": 701,
+				"triBinID": 7,
+				"binType": "LANDFILL",
+				"wasteHeight": 0
+			},
+			{
+				"binID": 702,
+				"triBinID": 7,
+				"binType": "RECYCLING",
+				"wasteHeight": 0
+			},
+			{
+				"binID": 703,
+				"triBinID": 7,
+				"binType": "COMPOST",
+				"wasteHeight": 0
+			}
+		]
+	},
+	{
+		"triBinID": 8,
+		"zone": "",
+		"location": "Behind the welcome center and near the parking structure 5.",
+		"binCoordinatesX": -121.427862,
+		"binCoordinatesY": 38.56470943,
+		"bins": [
+			{
+				"binID": 801,
+				"triBinID": 8,
+				"binType": "LANDFILL",
+				"wasteHeight": 0
+			},
+			{
+				"binID": 802,
+				"triBinID": 8,
+				"binType": "RECYCLING",
+				"wasteHeight": 0
+			},
+			{
+				"binID": 803,
+				"triBinID": 8,
+				"binType": "COMPOST",
+				"wasteHeight": 0
+			}
+		]
+	}
+]
