@@ -1,6 +1,10 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 @import 'tailwindcss';
 
+/* desktop layout (sidebar, 4-column summary): wide AND landscape. width alone isn't enough:
+   an ipad pro in portrait is 1024px wide but should get the tablet layout with the bottom tab bar */
+@custom-variant desk (@media (min-width: 1024px) and (orientation: landscape));
+
 @theme inline {
   --font-display: 'Outfit', system-ui, sans-serif;
   --font-sans: 'Outfit', system-ui, sans-serif;
@@ -13,6 +17,22 @@
   --color-teal: #1B5B65; /* info, links, map, selected states */
   --color-olive: #798F53; /* calm, "all good"; too light for text */
   --color-rose: #C88582; /* only for things that need attention; too light for text */
+  /* soft tints and text shades for the summary tiles (from the mockups) */
+  --color-teal-soft: #DCE8E9; /* info tiles */
+  --color-olive-soft: #E3EAD6; /* calm tiles, "good" pill */
+  --color-olive-ink: #3E5325; /* text on olive-soft */
+  --color-pine-muted: #5B6B60; /* small labels on light backgrounds */
+  --color-mist: #B9C4B4; /* small labels and idle icons on pine */
+  --color-critical-soft: #F2DAD6;
+  --color-warn-soft: #F3E3BF;
+  --color-offline-soft: #E6E4DA;
+
+  /* quick fade when switching pages (fade only: a slide would move the map while it measures itself) */
+  --animate-page-in: page-in 180ms ease-out;
+  @keyframes page-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
 
   /* older names the app already uses, remapped onto the palette */
   --color-forest: #0F2E23; /* pine */
@@ -42,6 +62,20 @@
 *::-webkit-scrollbar { width: 4px; height: 4px; }
 *::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb { background: #d6d0b4; border-radius: 99px; }
+
+/* summary tiles fade and rise into place as they scroll into view (see SummaryPage).
+   the hidden start only applies while JS is watching, so tiles can never get stuck invisible */
+[data-reveal]:not([data-shown]) {
+  opacity: 0;
+  transform: translateY(16px);
+}
+[data-reveal] {
+  transition: opacity 500ms ease-out, transform 500ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal]:not([data-shown]) { opacity: 1; transform: none; }
+  [data-reveal] { transition: none; }
+}
 
 body {
   font-family: var(--font-sans);
