@@ -1,8 +1,7 @@
 package main.java.trashtalk.wastemonitoring.model;
 
-
 /**
- * Represents a waste bin in the waste monitoring system.
+ * Represents an individual bin within a tribin in the waste monitoring system.
  *
  * A Bin stores its identification, location, and waste stream.
  * 
@@ -16,30 +15,38 @@ public class Bin {
 												entire tribin structure, not just the actual trash bin itself. The current value for BIN_HEIGHT is
 												temporary until we get a measurement of the stand-alone bin for accurate sensor readings.*/
 	// Bin information
-	private int binID;
-	private String binLocation;
-	private double binCoordinatesX;
-	private double binCoordinatesY;
-	private	BinType binType;
+	private int binID;			// Unique ID of the Bin
+	private int triBinID;		// ID of the TriBin the Bin belongs to
+	private	BinType binType;	// Type of waste collected by the Bin
 	
 	// Waste level information
 	private double wasteHeight;
+	private double wasteHeight; // Current waste level measured by height
+	
 
 	/**
 	 * Creates a new Bin.
 	 * 
 	 * @param binID the unique ID of the bin
-	 * @param binLocation the physical location of the bin
+	 * @param triBinID the unique ID of the tribin housing the individual bin
 	 * @param binType the type of waste collected by the bin
 	 */
 
 	public Bin(int binID, String binLocation, BinType binType){
+	 */	
+	public Bin(int binID, int triBinID, BinType binType){
 		this.binID = binID;
-		this.binLocation = binLocation;
+		this.triBinID = triBinID;
 		this.binType = binType;
-		
-		// Initial values
 		this.wasteHeight = 0;
+	}
+	
+	
+	/**
+	 * No-argument constructor for loading tribins.json and initializing existing bin data into the database
+	 */
+	public Bin() {
+		// Empty constructor
 	}
 	
 	
@@ -58,23 +65,10 @@ public class Bin {
 	}
 
 	/**
-	 * Retrieves the bin location
+	 * Retrieves the parent tri-bin's ID number
 	 */
-	public String getBinLocation( ){
-		return binLocation;
-	}
-	
-	
-	/**
-	 * Retrieves the GPS coordinates of the bin
-	 */
-	public double getBinCoordinatesX() {
-		return binCoordinatesX;
-	}
-	
-	
-	public double getBinCoordinatesY() {
-		return binCoordinatesY;
+	public int getTriBinID() {
+		return triBinID;
 	}
 	
 	
@@ -90,8 +84,7 @@ public class Bin {
 	 * Sets the waste height according to the sensor reading
 	 */
 	public void setWasteHeight(SensorReading sensorReading) {
-		this.wasteHeight = sensorReading.getValue();
-		
+		this.wasteHeight = sensorReading.getValue();	
 	}
 	
 	
