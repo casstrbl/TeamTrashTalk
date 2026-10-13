@@ -10,7 +10,7 @@ class BinTest {
 
     @Test
     void newBinStartsEmpty() {
-        Bin bin = new Bin(1, "Library", Bin.BinType.LANDFILL);
+        Bin bin = new Bin(1, 1, Bin.BinType.LANDFILL);
 
         assertEquals(0.0, bin.getWasteHeight());
     }

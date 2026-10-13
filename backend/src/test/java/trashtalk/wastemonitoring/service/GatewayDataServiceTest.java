@@ -15,7 +15,7 @@ class GatewayDataServiceTest {
     void receiveReadingUpdatesMatchingBin() {
 
         // Create a recycling bin
-        Bin bin = new Bin(1, "Library", Bin.BinType.RECYCLING);
+        Bin bin = new Bin(1, 1, Bin.BinType.RECYCLING);
 
         // Create an ultrasonic sensor for the recycling bin
         Sensor sensor = new Sensor(
@@ -44,7 +44,7 @@ class GatewayDataServiceTest {
     void receiveRequestUpdatesMatchingBin() {
 
         // Create a recycling bin
-        Bin bin = new Bin(1, "Library", Bin.BinType.RECYCLING);
+        Bin bin = new Bin(1, 1, Bin.BinType.RECYCLING);
 
         // Create and assign an ultrasonic sensor
         Sensor sensor = new Sensor(

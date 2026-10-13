@@ -21,8 +21,6 @@ public class Bin {
 	
 	// Waste level information
 	private double wasteHeight;
-	private double wasteHeight; // Current waste level measured by height
-	
 
 	/**
 	 * Creates a new Bin.
@@ -32,8 +30,6 @@ public class Bin {
 	 * @param binType the type of waste collected by the bin
 	 */
 
-	public Bin(int binID, String binLocation, BinType binType){
-	 */	
 	public Bin(int binID, int triBinID, BinType binType){
 		this.binID = binID;
 		this.triBinID = triBinID;
