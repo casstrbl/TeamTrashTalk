@@ -82,7 +82,13 @@ public class Bin {
 	public void setWasteHeight(SensorReading sensorReading) {
 		this.wasteHeight = sensorReading.getValue();	
 	}
-	
+
+	/**
+	 * Sets the waste height directly when loading stored or JSON data.
+	 */
+	public void setWasteHeight(double wasteHeight) {
+		this.wasteHeight = wasteHeight;
+	}
 	
 	/**
 	 * Represents the different types of waste streams.

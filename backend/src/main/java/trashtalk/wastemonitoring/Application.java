@@ -7,7 +7,7 @@ import main.java.trashtalk.wastemonitoring.controller.HealthController;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-
+import main.java.trashtalk.wastemonitoring.controller.TriBinController;
 public class Application {
 
 	public static void main(String[] args) {
@@ -30,12 +30,17 @@ public class Application {
 					new HealthController()
 			);
 
+			// Connect /api/tribins to the TriBinController
+			server.createContext(
+					"/api/tribins",
+					new TriBinController()
+			);
+
 			// Start the server
 			server.start();
 
-			System.out.println(
-					"http://localhost:8080/api/health"
-			);
+			System.out.println("Health: http://localhost:8080/api/health");
+			System.out.println("TriBins: http://localhost:8080/api/tribins");
 
 		} catch (IOException e) {
 			e.printStackTrace();
