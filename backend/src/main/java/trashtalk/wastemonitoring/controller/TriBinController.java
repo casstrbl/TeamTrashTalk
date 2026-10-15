@@ -4,9 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 
-import main.java.trashtalk.wastemonitoring.database.BinDataLoader;
 import main.java.trashtalk.wastemonitoring.dto.TriBinResponse;
 import main.java.trashtalk.wastemonitoring.model.TriBin;
+import main.java.trashtalk.wastemonitoring.respository.BinRepository;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -24,6 +24,9 @@ public class TriBinController implements HttpHandler {
 
     // Converts Java response objects into JSON
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    // reads tribins from the database
+    private final BinRepository binRepository = new BinRepository();
 
     @Override
     public void handle(HttpExchange exchange) throws IOException {
@@ -63,7 +66,8 @@ public class TriBinController implements HttpHandler {
         try {
 
             // Load the current TriBin data
-            List<TriBin> triBins = BinDataLoader.loadTriBins();
+            // read from the database so live readings show up
+            List<TriBin> triBins = binRepository.findAllTriBins();
 
             // Convert backend TriBins into the format expected by the frontend
             List<TriBinResponse> responses = new ArrayList<>();

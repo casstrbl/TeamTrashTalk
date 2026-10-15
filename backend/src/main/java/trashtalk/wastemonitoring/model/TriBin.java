@@ -1,5 +1,6 @@
 package main.java.trashtalk.wastemonitoring.model;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 public class TriBin {
@@ -11,7 +12,12 @@ public class TriBin {
 	private String location;
 	private double binCoordinatesX;
 	private double binCoordinatesY;
-	
+
+	// sensor info the dashboard shows
+	private int battery;
+	private String sensorStatus;
+	private LocalDateTime lastUpdated;
+
 	/**
 	 * Creates a new TriBin.
 	 * 
@@ -81,5 +87,35 @@ public class TriBin {
 	 */
 	public List<Bin> getBins() {
 		return bins;
+	}
+
+
+	// battery level from 0 to 100
+	public int getBattery() {
+		return battery;
+	}
+
+	public void setBattery(int battery) {
+		this.battery = battery;
+	}
+
+
+	// "online" or "offline"
+	public String getSensorStatus() {
+		return sensorStatus;
+	}
+
+	public void setSensorStatus(String sensorStatus) {
+		this.sensorStatus = sensorStatus;
+	}
+
+
+	// time of the last sensor reading
+	public LocalDateTime getLastUpdated() {
+		return lastUpdated;
+	}
+
+	public void setLastUpdated(LocalDateTime lastUpdated) {
+		this.lastUpdated = lastUpdated;
 	}
 }
