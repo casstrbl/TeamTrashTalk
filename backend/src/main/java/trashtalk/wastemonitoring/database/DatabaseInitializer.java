@@ -36,8 +36,8 @@ public class DatabaseInitializer {
 				triBinID INT PRIMARY KEY,
 				zone CHAR,
 				location VARCHAR(255),
-				binCoordinatesX DOUBLE,
-				binCoordinatesY DOUBLE,
+				binCoordinatesX DOUBLE PRECISION,
+				binCoordinatesY DOUBLE PRECISION,
 				battery INT,
 				sensorStatus VARCHAR(10),
 				lastUpdated TIMESTAMP
@@ -59,7 +59,7 @@ public class DatabaseInitializer {
 				binID INT PRIMARY KEY,
 				triBinID INT NOT NULL,
 				binType VARCHAR(20) NOT NULL,
-				wasteHeight DOUBLE,
+				wasteHeight DOUBLE PRECISION,
 				
 				FOREIGN KEY (triBinID)
 					REFERENCES triBins(triBinID)
@@ -125,7 +125,8 @@ private static void loadInitialData() {
 			
 			// Set the values for the current TriBin
 			triBinStatement.setInt(1, triBin.getTriBinID());
-			triBinStatement.setString(2, String.valueOf(triBin.getZone()));
+			// postgres rejects the empty char, so a blank zone is saved as null
+			triBinStatement.setString(2, triBin.getZone() == '\0' ? null : String.valueOf(triBin.getZone()));
 			triBinStatement.setString(3, triBin.getBinLocation());
 			triBinStatement.setDouble(4, triBin.getBinCoordinatesX());
 			triBinStatement.setDouble(5, triBin.getBinCoordinatesY());

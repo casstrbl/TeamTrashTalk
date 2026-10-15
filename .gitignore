@@ -5,3 +5,6 @@ node_modules/
 data/
 *.mv.db
 *.trace.db
+
+# local database settings with the password
+db.properties
