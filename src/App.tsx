@@ -28,17 +28,7 @@ const TEAL_HEX = '#1B5B65' // teal: selected pin ring, building names
 
 type Role = 'editor' | 'viewer'
 type Status = 'ok' | 'warn' | 'critical' | 'offline'
-type Zone =
-  | 'Main Quad'
-  | 'Sacramento Hall'
-  | 'Welcome Center'
-  | 'Shasta Hall'
-  | 'Yosemite Hall'
-  | 'Lassen Hall'
-  | 'Douglass Hall'
-  | 'Mendocino Hall'
-    | 'Zone A'
-    | 'Zone B'
+type Zone = 'Zone A' | 'Zone B'
 type Stream = 'Landfill' | 'Recycling' | 'Compost'
 
 interface Compartment {
@@ -83,58 +73,6 @@ interface StaffMember {
 
 // data
 
-// real bins from the client spreadsheet, fills are landfill/recycling/compost
-const ORIGINAL_TRIBINS: Tribin[] = [
-  {
-    id: 'TB-026', name: 'Bin 26', zone: 'Main Quad', location: 'Main quad',
-    lat: 38.56324, lng: -121.42557,
-    compartments: [{ label: 'Landfill', fill: 91 }, { label: 'Recycling', fill: 83 }, { label: 'Compost', fill: 78 }],
-    battery: 72, sensorStatus: 'online', lastUpdated: '2 min ago',
-  },
-  {
-    id: 'TB-024', name: 'Bin 24', zone: 'Sacramento Hall', location: 'Sacramento Hall front door',
-    lat: 38.56372, lng: -121.42650,
-    compartments: [{ label: 'Landfill', fill: 45 }, { label: 'Recycling', fill: 68 }, { label: 'Compost', fill: 30 }],
-    battery: 89, sensorStatus: 'online', lastUpdated: '4 min ago',
-  },
-  {
-    id: 'TB-010', name: 'Bin 10', zone: 'Welcome Center', location: 'In front of the Welcome Center',
-    lat: 38.56448, lng: -121.42751,
-    compartments: [{ label: 'Landfill', fill: 55 }, { label: 'Recycling', fill: 52 }, { label: 'Compost', fill: 48 }],
-    battery: 64, sensorStatus: 'online', lastUpdated: '5 min ago',
-  },
-  {
-    id: 'TB-041', name: 'Bin 41', zone: 'Shasta Hall', location: 'In front of Shasta Hall',
-    lat: 38.56432, lng: -121.42443,
-    compartments: [{ label: 'Landfill', fill: 74 }, { label: 'Recycling', fill: 61 }, { label: 'Compost', fill: 55 }],
-    battery: 61, sensorStatus: 'online', lastUpdated: '6 min ago',
-  },
-  {
-    id: 'TB-021', name: 'Bin 21', zone: 'Yosemite Hall', location: 'Yosemite Hall benches',
-    lat: 38.56288, lng: -121.42706,
-    compartments: [{ label: 'Landfill', fill: 0 }, { label: 'Recycling', fill: 0 }, { label: 'Compost', fill: 0 }],
-    battery: 12, sensorStatus: 'offline', lastUpdated: '3 hrs ago',
-  },
-  {
-    id: 'TB-036', name: 'Bin 36', zone: 'Lassen Hall', location: 'Lassen Hall entrance',
-    lat: 38.56287, lng: -121.42556,
-    compartments: [{ label: 'Landfill', fill: 38 }, { label: 'Recycling', fill: 44 }, { label: 'Compost', fill: 29 }],
-    battery: 78, sensorStatus: 'online', lastUpdated: '3 min ago',
-  },
-  {
-    id: 'TB-040', name: 'Bin 40', zone: 'Douglass Hall', location: 'In front of Douglass Hall',
-    lat: 38.56275, lng: -121.42491,
-    compartments: [{ label: 'Landfill', fill: 22 }, { label: 'Recycling', fill: 18 }, { label: 'Compost', fill: 10 }],
-    battery: 95, sensorStatus: 'online', lastUpdated: '1 min ago',
-  },
-  {
-    id: 'TB-035', name: 'Bin 35', zone: 'Mendocino Hall', location: 'Riverfront, near Mendocino Hall',
-    lat: 38.56309, lng: -121.42413,
-    compartments: [{ label: 'Landfill', fill: 14 }, { label: 'Recycling', fill: 22 }, { label: 'Compost', fill: 8 }],
-    battery: 91, sensorStatus: 'online', lastUpdated: '5 min ago',
-  },
-]
-
 const STAFF: StaffMember[] = [
   { id: 's1', name: 'Person 1', role: 'editor', zones: ['Zone A', 'Zone B'], email: 'person1@csus.edu' },
   { id: 's2', name: 'Person 2', role: 'viewer', zones: ['Zone A'], email: 'person2@csus.edu' },
@@ -143,7 +81,7 @@ const STAFF: StaffMember[] = [
   { id: 's5', name: 'Person 5', role: 'viewer', zones: ['Zone B'], email: 'person5@csus.edu' },
 ]
 
-// one zone per building, so staff can filter by location
+// bins come from mockBins.ts until the site reads from the api
 const TRIBINS: Tribin[] = mockBins as Tribin[]
 
 // demo only: the same bins as if just emptied (a third of each fill, sensors back online),
