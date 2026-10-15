@@ -11,7 +11,7 @@ class BinServiceTest {
 
     @Test
     void testNewBinPercentageIsZero() {
-        Bin bin = new Bin(1, "Library", Bin.BinType.LANDFILL);
+        Bin bin = new Bin(1, 1, Bin.BinType.LANDFILL);
         BinService binService = new BinService();
 
         double percentage = binService.getPercentage(bin);
@@ -21,7 +21,7 @@ class BinServiceTest {
 
     @Test
     void testNewBinStatusIsGreen() {
-        Bin bin = new Bin(1, "Library", Bin.BinType.LANDFILL);
+        Bin bin = new Bin(1, 1, Bin.BinType.LANDFILL);
         BinService binService = new BinService();
 
         Bin.BinStatus status = binService.getStatus(bin);

@@ -22,7 +22,7 @@ class SensorTest {
         // Create a bin and assign the sensor to it
         Bin bin = new Bin(
                 1,
-                "Library",
+                1,
                 Bin.BinType.RECYCLING
         );
 

@@ -8,6 +8,7 @@ import main.java.trashtalk.wastemonitoring.model.Bin;
 import main.java.trashtalk.wastemonitoring.model.Sensor;
 import main.java.trashtalk.wastemonitoring.service.GatewayDataService;
 import main.java.trashtalk.wastemonitoring.dto.SensorReadingRequest;
+import main.java.trashtalk.wastemonitoring.service.HistoryService;
 
 class GatewayDataServiceTest {
 
@@ -15,7 +16,7 @@ class GatewayDataServiceTest {
     void receiveReadingUpdatesMatchingBin() {
 
         // Create a recycling bin
-        Bin bin = new Bin(1, "Library", Bin.BinType.RECYCLING);
+        Bin bin = new Bin(1, 1, Bin.BinType.RECYCLING);
 
         // Create an ultrasonic sensor for the recycling bin
         Sensor sensor = new Sensor(
@@ -27,7 +28,10 @@ class GatewayDataServiceTest {
         sensor.assignToBin(bin);
 
         // Simulate gateway data being received
-        GatewayDataService gatewayDataService = new GatewayDataService();
+        HistoryService historyService = new HistoryService();
+
+        GatewayDataService gatewayDataService =
+                new GatewayDataService(historyService);
 
         gatewayDataService.receiveReading(
                 101,
@@ -39,12 +43,13 @@ class GatewayDataServiceTest {
 
         // Confirm that the reading reached the bin
         assertEquals(25.5, bin.getWasteHeight());
+        assertEquals(1, historyService.getHistory().size());
     }
     @Test
     void receiveRequestUpdatesMatchingBin() {
 
         // Create a recycling bin
-        Bin bin = new Bin(1, "Library", Bin.BinType.RECYCLING);
+        Bin bin = new Bin(1, 1, Bin.BinType.RECYCLING);
 
         // Create and assign an ultrasonic sensor
         Sensor sensor = new Sensor(
@@ -69,5 +74,32 @@ class GatewayDataServiceTest {
 
         // Confirm that the reading reached the bin
         assertEquals(25.5, bin.getWasteHeight());
+    }
+    @Test
+    void invalidReadingIsNotStoredInHistory() {
+
+        Bin bin = new Bin(1, 1, Bin.BinType.RECYCLING);
+
+        Sensor sensor = new Sensor(
+                101,
+                Sensor.SensorType.ULTRASONIC
+        );
+
+        sensor.assignToBin(bin);
+
+        HistoryService historyService = new HistoryService();
+
+        GatewayDataService gatewayDataService =
+                new GatewayDataService(historyService);
+
+        gatewayDataService.receiveReading(
+                999,
+                25.5,
+                "cm",
+                sensor,
+                bin
+        );
+
+        assertEquals(0, historyService.getHistory().size());
     }
 }

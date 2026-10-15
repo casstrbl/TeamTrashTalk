@@ -24,7 +24,9 @@ public class SensorService {
      * - Add handling for invalid or missing sensor readings.
      * - Connect this method to the future API/gateway data path.
      */
-    public void processReading(SensorReading reading, Sensor sensor, Bin bin) {
+
+    // Returns whether the reading was accepted so valid readings can be stored in history.
+    public boolean processReading(SensorReading reading, Sensor sensor, Bin bin) {
         if (reading.getSensorID() == sensor.getSensorID()
                 && sensor.isActive()) {
 
@@ -33,6 +35,8 @@ public class SensorService {
             // For ultrasonic sensors, this will later need to be converted
             // from sensor-to-trash distance into actual waste height/fullness.
             bin.setWasteHeight(reading);
+            return true;
         }
+        return false;
     }
 }

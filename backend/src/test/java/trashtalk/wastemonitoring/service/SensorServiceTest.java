@@ -15,7 +15,7 @@ class SensorServiceTest {
 	void processReadingUpdatesMatchingBin() {
 
 		// Create a recycling bin
-		Bin bin = new Bin(1, "Library", Bin.BinType.RECYCLING);
+		Bin bin = new Bin(1, 1, Bin.BinType.RECYCLING);
 
 		// Create an active ultrasonic sensor
 		Sensor sensor = new Sensor(
