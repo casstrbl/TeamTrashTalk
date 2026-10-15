@@ -1,8 +1,11 @@
 package main.java.trashtalk.wastemonitoring.dto;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import main.java.trashtalk.wastemonitoring.model.Bin;
 import main.java.trashtalk.wastemonitoring.model.TriBin;
+import main.java.trashtalk.wastemonitoring.service.BinService;
 
 /**
  * Represents the TriBin information returned by the API.
@@ -33,6 +36,18 @@ public class TriBinResponse {
     // Individual waste compartments belonging to the TriBin
     private List<CompartmentResponse> compartments;
 
+    // battery level from 0 to 100
+    private int battery;
+
+    // "online" or "offline"
+    private String sensorStatus;
+
+    // readable time since the last reading, like "2 min ago"
+    private String lastUpdated;
+
+    // turns waste height into a fill percent
+    private static final BinService binService = new BinService();
+
     /**
      * Creates a TriBin response in the format expected by the frontend.
      */
@@ -43,7 +58,10 @@ public class TriBinResponse {
             String location,
             double lat,
             double lng,
-            List<CompartmentResponse> compartments) {
+            List<CompartmentResponse> compartments,
+            int battery,
+            String sensorStatus,
+            String lastUpdated) {
 
         this.id = id;
         this.name = name;
@@ -52,6 +70,9 @@ public class TriBinResponse {
         this.lat = lat;
         this.lng = lng;
         this.compartments = compartments;
+        this.battery = battery;
+        this.sensorStatus = sensorStatus;
+        this.lastUpdated = lastUpdated;
     }
 
     /**
@@ -103,6 +124,18 @@ public class TriBinResponse {
         return compartments;
     }
 
+    public int getBattery() {
+        return battery;
+    }
+
+    public String getSensorStatus() {
+        return sensorStatus;
+    }
+
+    public String getLastUpdated() {
+        return lastUpdated;
+    }
+
     /**
      * Converts a backend TriBin into the response format expected by the frontend.
      */
@@ -111,14 +144,17 @@ public class TriBinResponse {
         return new TriBinResponse(
                 "TB-" + triBin.getTriBinID(),
                 "Bin " + triBin.getTriBinID(),
-                triBin.getZone() == '\0' ? "" : String.valueOf(triBin.getZone()),
+                formatZone(triBin.getZone()),
                 triBin.getBinLocation(),
                 triBin.getBinCoordinatesY(),
                 triBin.getBinCoordinatesX(),
                 triBin.getBins()
                         .stream()
                         .map(TriBinResponse::createCompartment)
-                        .toList()
+                        .toList(),
+                triBin.getBattery(),
+                triBin.getSensorStatus() == null ? "offline" : triBin.getSensorStatus(),
+                formatLastUpdated(triBin.getLastUpdated(), LocalDateTime.now())
         );
     }
 
@@ -126,10 +162,47 @@ public class TriBinResponse {
      * Converts a backend Bin into the compartment format expected by the frontend.
      */
     private static CompartmentResponse createCompartment(Bin bin) {
+
+        // the site wants a percent, not a height in cm
+        double percent = binService.getPercentage(bin);
+        int fill = (int) Math.max(0, Math.min(100, percent));
+
         return new CompartmentResponse(
                 formatBinType(bin.getBinType().name()),
-                bin.getWasteHeight()
+                fill
         );
+    }
+
+    // 'A' becomes "Zone A" to match the site
+    public static String formatZone(char zone) {
+        if (zone == '\0' || zone == ' ') {
+            return "";
+        }
+        return "Zone " + zone;
+    }
+
+    // matches the site's "2 min ago" style
+    public static String formatLastUpdated(LocalDateTime lastUpdated, LocalDateTime now) {
+        if (lastUpdated == null) {
+            return "never";
+        }
+
+        long minutes = Math.max(0, Duration.between(lastUpdated, now).toMinutes());
+
+        if (minutes < 1) {
+            return "just now";
+        }
+        if (minutes < 60) {
+            return minutes + " min ago";
+        }
+
+        long hours = minutes / 60;
+        if (hours < 24) {
+            return hours == 1 ? "1 hour ago" : hours + " hours ago";
+        }
+
+        long days = hours / 24;
+        return days == 1 ? "1 day ago" : days + " days ago";
     }
 
     /**
@@ -149,13 +222,13 @@ public class TriBinResponse {
         // Waste stream label, such as Landfill, Recycling, or Compost
         private String label;
 
-        // Current fill level for the compartment
-        private double fill;
+        // fill percent from 0 to 100
+        private int fill;
 
         /**
          * Creates a compartment response for one waste stream.
          */
-        public CompartmentResponse(String label, double fill) {
+        public CompartmentResponse(String label, int fill) {
             this.label = label;
             this.fill = fill;
         }
@@ -170,7 +243,7 @@ public class TriBinResponse {
         /**
          * Retrieves the current fill level.
          */
-        public double getFill() {
+        public int getFill() {
             return fill;
         }
     }
