@@ -102,4 +102,28 @@ class GatewayDataServiceTest {
 
         assertEquals(0, historyService.getHistory().size());
     }
+
+    /**
+     * Confirms that a sensor reading request can include
+     * a battery level without changing the existing gateway format.
+     */
+    @Test
+    void sensorReadingRequestStoresBatteryLevel() {
+
+        // Create a simulated sensor request with battery information.
+        SensorReadingRequest request =
+                new SensorReadingRequest(
+                        101,
+                        25.5,
+                        "cm",
+                        85.0
+                );
+
+        // Confirm the battery level was stored correctly.
+        assertEquals(
+                85.0,
+                request.getBatteryLevel(),
+                0.001
+        );
+    }
 }
