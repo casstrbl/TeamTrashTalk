@@ -3,6 +3,8 @@ package main.java.trashtalk.wastemonitoring.database;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.PreparedStatement;
+import java.sql.Statement;
+import java.sql.Timestamp;
 import java.util.List;
 
 import main.java.trashtalk.wastemonitoring.config.DatabaseConfig;
@@ -34,9 +36,19 @@ public class DatabaseInitializer {
 				triBinID INT PRIMARY KEY,
 				zone CHAR,
 				location VARCHAR(255),
-				binCoordinatesX DOUBLE,
-				binCoordinatesY DOUBLE
+				binCoordinatesX DOUBLE PRECISION,
+				binCoordinatesY DOUBLE PRECISION,
+				battery INT,
+				sensorStatus VARCHAR(10),
+				lastUpdated TIMESTAMP
 				)
+				""";
+
+		// adds the sensor columns to databases made before they existed
+		String addSensorColumns = """
+				ALTER TABLE triBins ADD COLUMN IF NOT EXISTS battery INT;
+				ALTER TABLE triBins ADD COLUMN IF NOT EXISTS sensorStatus VARCHAR(10);
+				ALTER TABLE triBins ADD COLUMN IF NOT EXISTS lastUpdated TIMESTAMP;
 				""";
 	
 		/**
@@ -47,7 +59,7 @@ public class DatabaseInitializer {
 				binID INT PRIMARY KEY,
 				triBinID INT NOT NULL,
 				binType VARCHAR(20) NOT NULL,
-				wasteHeight DOUBLE,
+				wasteHeight DOUBLE PRECISION,
 				
 				FOREIGN KEY (triBinID)
 					REFERENCES triBins(triBinID)
@@ -64,7 +76,12 @@ public class DatabaseInitializer {
 		
 				// Execute the SQL statement to create the tri-bins table
 				triBinStatement.execute();
-				
+
+				// make sure older databases have the sensor columns
+				try (Statement alterStatement = connection.createStatement()) {
+					alterStatement.execute(addSensorColumns);
+				}
+
 				// Execute the SQL statement to create the bins table
 				binStatement.execute();
 		
@@ -87,8 +104,8 @@ private static void loadInitialData() {
 	// SQL statement to insert a TriBin into the triBins table
 	String insertTriBin = """
 			INSERT INTO triBins
-			(triBinID, zone, location, binCoordinatesX, binCoordinatesY)
-			VALUES (?, ?, ?, ?, ?)
+			(triBinID, zone, location, binCoordinatesX, binCoordinatesY, battery, sensorStatus, lastUpdated)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			""";
 	
 	// SQL statement to insert an individual bin into the bins table
@@ -108,11 +125,15 @@ private static void loadInitialData() {
 			
 			// Set the values for the current TriBin
 			triBinStatement.setInt(1, triBin.getTriBinID());
-			triBinStatement.setString(2, String.valueOf(triBin.getZone()));
+			// postgres rejects the empty char, so a blank zone is saved as null
+			triBinStatement.setString(2, triBin.getZone() == '\0' ? null : String.valueOf(triBin.getZone()));
 			triBinStatement.setString(3, triBin.getBinLocation());
 			triBinStatement.setDouble(4, triBin.getBinCoordinatesX());
 			triBinStatement.setDouble(5, triBin.getBinCoordinatesY());
-		
+			triBinStatement.setInt(6, triBin.getBattery());
+			triBinStatement.setString(7, triBin.getSensorStatus());
+			triBinStatement.setTimestamp(8, Timestamp.valueOf(triBin.getLastUpdated()));
+
 			// Insert the TriBin into the database
 			triBinStatement.executeUpdate();
 			

@@ -1,0 +1,7 @@
+# copy this file to backend/db.properties and fill in the password
+# db.properties is in .gitignore so the password never gets committed
+# leave db.url empty to use the local h2 database instead
+
+db.url=jdbc:postgresql://aws-1-us-west-2.pooler.supabase.com:5432/postgres
+db.user=postgres.ivynfhxtjtvqpbgodnrd
+db.password=

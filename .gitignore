@@ -1,2 +1,10 @@
 .idea/
 node_modules/
+
+# local h2 database files
+data/
+*.mv.db
+*.trace.db
+
+# local database settings with the password
+db.properties

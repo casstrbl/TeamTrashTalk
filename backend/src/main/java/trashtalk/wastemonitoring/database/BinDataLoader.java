@@ -1,6 +1,7 @@
 package main.java.trashtalk.wastemonitoring.database;
 
 import java.io.InputStream;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -52,7 +53,12 @@ public class BinDataLoader {
 						data.binCoordinatesY,
 						data.bins
 					);
-				
+
+				// simulated sensor info until real sensors are hooked up
+				triBin.setBattery(data.battery);
+				triBin.setSensorStatus(data.sensorStatus);
+				triBin.setLastUpdated(LocalDateTime.now().minusMinutes(data.lastUpdatedMinutesAgo));
+
 				// Add the completed TriBin to the list
 				triBins.add(triBin);
 			}
@@ -93,6 +99,15 @@ public class BinDataLoader {
 		
 		// List of bins belonging to the TriBin
 		public List<Bin> bins;
+
+		// battery level from 0 to 100
+		public int battery;
+
+		// "online" or "offline"
+		public String sensorStatus;
+
+		// how long ago the last reading was, in minutes
+		public int lastUpdatedMinutesAgo;
 	}
 	
 	/**
