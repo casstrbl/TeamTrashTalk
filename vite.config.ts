@@ -12,4 +12,10 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  // send /api requests to the java backend while running locally
+  server: {
+    proxy: {
+      '/api': 'http://localhost:8080',
+    },
+  },
 })
