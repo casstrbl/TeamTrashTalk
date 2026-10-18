@@ -31,9 +31,10 @@ Routes:
 
 You need Node and pnpm.
 
-1. Create a `.env` file in the project root with `VITE_API_URL=http://localhost:8080`.
-2. Run `pnpm install`, then `pnpm dev`.
-3. Open `http://localhost:5173/TeamTrashTalk/`.
+1. Run `pnpm install`, then `pnpm dev`.
+2. Open `http://localhost:5173/TeamTrashTalk/`.
+
+While `pnpm dev` is running, it forwards `/api` requests to the backend on port 8080, so no extra setup is needed. To point the site at a different backend, set `VITE_API_URL` in a `.env` file.
 
 If the backend isn't running, the site falls back to the sample bins in `src/data/mockBins.ts`.
 
