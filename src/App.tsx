@@ -1353,6 +1353,25 @@ export default function App() {
   const [page, setPage] = useState<Page>('summary')
   const [editingStaff, setEditingStaff] = useState<string | null>(null)
   const [staffList, setStaffList] = useState<StaffMember[]>(STAFF)
+  const [apiBins, setApiBins] = useState<Tribin[]>(TRIBINS)
+
+  useEffect(() => {
+    const apiUrl = import.meta.env.VITE_API_URL ?? ''
+
+    fetch(`${apiUrl}/api/tribins`)
+        .then(response => {
+          if (!response.ok) {
+            throw new Error('Failed to load bins')
+          }
+          return response.json()
+        })
+        .then(data => {
+          setApiBins(data as Tribin[])
+        })
+        .catch(error => {
+          console.error('Could not load /api/tribins:', error)
+        })
+  }, [])
 
   // role and zones come from the staff list, so changes in admin apply right away.
   // editors see every bin; viewers only bins in the zones an admin assigned them.
@@ -1363,8 +1382,8 @@ export default function App() {
   const zonesKey = visibleZones.join()
   const sampleData = currentUserId === SAMPLE_USER_ID
   const myBins = useMemo(
-    () => (sampleData ? SAMPLE_CLEAR_BINS : TRIBINS).filter(b => visibleZones.includes(b.zone)),
-    [zonesKey, sampleData],
+    () => (sampleData ? SAMPLE_CLEAR_BINS : apiBins).filter(b => visibleZones.includes(b.zone)),
+    [zonesKey, sampleData, apiBins],
   )
   const noZones = myBins.length === 0
 
