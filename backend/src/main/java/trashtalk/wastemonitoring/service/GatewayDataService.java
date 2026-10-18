@@ -1,0 +1,78 @@
+package main.java.trashtalk.wastemonitoring.service;
+
+import main.java.trashtalk.wastemonitoring.model.Bin;
+import main.java.trashtalk.wastemonitoring.model.Sensor;
+import main.java.trashtalk.wastemonitoring.model.SensorReading;
+import main.java.trashtalk.wastemonitoring.dto.SensorReadingRequest;
+
+/**
+ * Handles sensor data coming from a gateway or simulated gateway source.
+ *
+ * Current behavior:
+ * - Accepts basic sensor data.
+ * - Converts that data into a SensorReading object.
+ * - Passes the reading to SensorService for processing.
+ *  * - Stores accepted readings in the history service.
+ *
+ * Future work:
+ * - Connect this service to an API endpoint such as POST /sensor-readings.
+ * - Accept real LoRaWAN gateway data.
+ * - Validate incoming gateway payloads.
+ * - Add error handling for unknown sensors or bins.
+ */
+
+public class GatewayDataService {
+
+    private SensorService sensorService;
+    private HistoryService historyService;
+
+    public GatewayDataService() {
+        this(new HistoryService());
+    }
+
+    /**
+     * Creates a gateway data service using the shared history service.
+     */
+    public GatewayDataService(HistoryService historyService) {
+        this.sensorService = new SensorService();
+        this.historyService = historyService;
+    }
+
+    public void receiveReading(
+            int sensorID,
+            double value,
+            String unit,
+            Sensor sensor,
+            Bin bin) {
+
+        SensorReading reading =
+                new SensorReading(sensorID, value, unit);
+
+        boolean accepted = sensorService.processReading(reading, sensor, bin);
+
+        if (accepted) {
+            historyService.addReading(reading);
+        }
+    }
+    /**
+     * Receives sensor data using the generalized API request format.
+     *
+     * @param request incoming sensor reading data
+     * @param sensor sensor associated with the reading
+     * @param bin bin assigned to the sensor
+     */
+    public void receiveReading(
+            SensorReadingRequest request,
+            Sensor sensor,
+            Bin bin) {
+
+        // Reuse the existing reading flow with values from the request objec
+        receiveReading(
+                request.getSensorID(),
+                request.getValue(),
+                request.getUnit(),
+                sensor,
+                bin
+        );
+    }
+}
