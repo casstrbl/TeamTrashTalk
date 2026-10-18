@@ -1,6 +1,7 @@
 import { useState, useMemo, Fragment } from 'react'
 import logoUrl from './imports/logo.png'
 import { mockBins } from './data/mockBins'
+import { mockHistory } from './data/mockHistory'
 
 // fill bands: green 0-49, yellow 50-79, red 80-100
 const WARN_AT = 50
@@ -368,7 +369,7 @@ export default function App() {
   const [alertThreshold, setAlertThreshold] = useState(80)
   const [dismissedIds, setDismissedIds] = useState<string[]>([])
   const [selectedBin, setSelectedBin] = useState<Tribin | null>(null)
-  const [activeTab, setActiveTab] = useState<'overview' | 'manage'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'manage' | 'history' >('overview')
   const [editingStaff, setEditingStaff] = useState<string | null>(null)
   const [staffList, setStaffList] = useState<StaffMember[]>(STAFF)
 
@@ -495,6 +496,16 @@ export default function App() {
               className={`px-4 py-3 text-sm font-bold border-b-2 transition-colors capitalize ${activeTab === tab ? 'border-mint-dark text-forest' : 'border-transparent text-stone-400 hover:text-stone-600'}`}
             >{tab === 'overview' ? 'Dashboard' : tab}</button>
           ))}
+          <button
+              onClick={() => setActiveTab('history')}
+              className={`px-4 py-3 text-sm font-bold border-b-2 transition-colors ${
+                  activeTab === 'history'
+                      ? 'border-mint-dark text-forest'
+                      : 'border-transparent text-stone-500 hover:text-stone-600'
+              }`}
+          >
+            History
+          </button>
           {currentRole === 'editor' && (
             <button onClick={() => setActiveTab('manage')}
               className={`px-4 py-3 text-sm font-bold border-b-2 transition-colors ${activeTab === 'manage' ? 'border-mint-dark text-forest' : 'border-transparent text-stone-400 hover:text-stone-600'}`}
@@ -505,6 +516,37 @@ export default function App() {
 
       {/* main */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+        {activeTab === 'history' && (
+            <section className="space-y-4">
+              <div>
+                <h2 className="text-2xl font-bold text-forest">Fill History</h2>
+                <p className="text-sm text-stone-500">
+                  Past fill levels for Bin 148
+                </p>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
+                <div className="grid grid-cols-4 gap-4 px-4 py-3 bg-stone-50 text-xs font-bold text-stone-500">
+                  <div>Bin</div>
+                  <div>Stream</div>
+                  <div>Fill Level</div>
+                  <div>Time</div>
+                </div>
+
+                {mockHistory.map((reading) => (
+                    <div
+                        key={`${reading.triBinID}-${reading.stream}-${reading.timestamp}`}
+                        className="grid grid-cols-4 gap-4 px-4 py-3 border-t border-stone-100 text-sm"
+                    >
+                      <div className="font-semibold">{reading.triBinID}</div>
+                      <div>{reading.stream}</div>
+                      <div>{reading.fill}%</div>
+                      <div className="text-stone-500">{reading.timestamp}</div>
+                    </div>
+                ))}
+              </div>
+            </section>
+        )}
 
         {activeTab === 'overview' && (
           <>
