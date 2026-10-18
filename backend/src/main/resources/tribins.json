@@ -1,0 +1,362 @@
+[
+	{
+		"triBinID": 143,
+		"zone": "A",
+		"location": "Outside Benicia Hall",
+		"binCoordinatesX": -121.4223845,
+		"binCoordinatesY": 38.55793598,
+		"battery": 88,
+		"sensorStatus": "online",
+		"lastUpdatedMinutesAgo": 2,
+		"bins": [
+			{
+				"binID": 14301,
+				"triBinID": 143,
+				"binType": "LANDFILL",
+				"wasteHeight": 26.95
+			},
+			{
+				"binID": 14302,
+				"triBinID": 143,
+				"binType": "RECYCLING",
+				"wasteHeight": 32.34
+			},
+			{
+				"binID": 14303,
+				"triBinID": 143,
+				"binType": "COMPOST",
+				"wasteHeight": 21.56
+			}
+		]
+	},
+	{
+		"triBinID": 144,
+		"zone": "A",
+		"location": "Outside Children's Center",
+		"binCoordinatesX": -121.4200349,
+		"binCoordinatesY": 38.55870766,
+		"battery": 81,
+		"sensorStatus": "online",
+		"lastUpdatedMinutesAgo": 4,
+		"bins": [
+			{
+				"binID": 14401,
+				"triBinID": 144,
+				"binType": "LANDFILL",
+				"wasteHeight": 44.66
+			},
+			{
+				"binID": 14402,
+				"triBinID": 144,
+				"binType": "RECYCLING",
+				"wasteHeight": 51.59
+			},
+			{
+				"binID": 14403,
+				"triBinID": 144,
+				"binType": "COMPOST",
+				"wasteHeight": 34.65
+			}
+		]
+	},
+	{
+		"triBinID": 145,
+		"zone": "A",
+		"location": "Side entrance of Art Commons",
+		"binCoordinatesX": -121.4195429,
+		"binCoordinatesY": 38.55808311,
+		"battery": 74,
+		"sensorStatus": "online",
+		"lastUpdatedMinutesAgo": 5,
+		"bins": [
+			{
+				"binID": 14501,
+				"triBinID": 145,
+				"binType": "LANDFILL",
+				"wasteHeight": 64.68
+			},
+			{
+				"binID": 14502,
+				"triBinID": 145,
+				"binType": "RECYCLING",
+				"wasteHeight": 58.52
+			},
+			{
+				"binID": 14503,
+				"triBinID": 145,
+				"binType": "COMPOST",
+				"wasteHeight": 48.51
+			}
+		]
+	},
+	{
+		"triBinID": 146,
+		"zone": "A",
+		"location": "In front of Campus Police",
+		"binCoordinatesX": -121.4200278,
+		"binCoordinatesY": 38.55753197,
+		"battery": 93,
+		"sensorStatus": "online",
+		"lastUpdatedMinutesAgo": 3,
+		"bins": [
+			{
+				"binID": 14601,
+				"triBinID": 146,
+				"binType": "LANDFILL",
+				"wasteHeight": 16.94
+			},
+			{
+				"binID": 14602,
+				"triBinID": 146,
+				"binType": "RECYCLING",
+				"wasteHeight": 23.87
+			},
+			{
+				"binID": 14603,
+				"triBinID": 146,
+				"binType": "COMPOST",
+				"wasteHeight": 14.63
+			}
+		]
+	},
+	{
+		"triBinID": 148,
+		"zone": "A",
+		"location": "Behind The WELL",
+		"binCoordinatesX": -121.4251549,
+		"binCoordinatesY": 38.5564005,
+		"battery": 69,
+		"sensorStatus": "online",
+		"lastUpdatedMinutesAgo": 1,
+		"bins": [
+			{
+				"binID": 14801,
+				"triBinID": 148,
+				"binType": "LANDFILL",
+				"wasteHeight": 74.69
+			},
+			{
+				"binID": 14802,
+				"triBinID": 148,
+				"binType": "RECYCLING",
+				"wasteHeight": 70.07
+			},
+			{
+				"binID": 14803,
+				"triBinID": 148,
+				"binType": "COMPOST",
+				"wasteHeight": 67.76
+			}
+		]
+	},
+	{
+		"triBinID": 149,
+		"zone": "A",
+		"location": "Near The WELL and Stadium",
+		"binCoordinatesX": -121.4245622,
+		"binCoordinatesY": 38.55610063,
+		"battery": 76,
+		"sensorStatus": "online",
+		"lastUpdatedMinutesAgo": 6,
+		"bins": [
+			{
+				"binID": 14901,
+				"triBinID": 149,
+				"binType": "LANDFILL",
+				"wasteHeight": 39.27
+			},
+			{
+				"binID": 14902,
+				"triBinID": 149,
+				"binType": "RECYCLING",
+				"wasteHeight": 35.42
+			},
+			{
+				"binID": 14903,
+				"triBinID": 149,
+				"binType": "COMPOST",
+				"wasteHeight": 55.44
+			}
+		]
+	},
+	{
+		"triBinID": 154,
+		"zone": "B",
+		"location": "In front of Sierra Hall",
+		"binCoordinatesX": -121.4264751,
+		"binCoordinatesY": 38.56689386,
+		"battery": 84,
+		"sensorStatus": "online",
+		"lastUpdatedMinutesAgo": 3,
+		"bins": [
+			{
+				"binID": 15401,
+				"triBinID": 154,
+				"binType": "LANDFILL",
+				"wasteHeight": 31.57
+			},
+			{
+				"binID": 15402,
+				"triBinID": 154,
+				"binType": "RECYCLING",
+				"wasteHeight": 41.58
+			},
+			{
+				"binID": 15403,
+				"triBinID": 154,
+				"binType": "COMPOST",
+				"wasteHeight": 25.41
+			}
+		]
+	},
+	{
+		"triBinID": 155,
+		"zone": "B",
+		"location": "Near Dining Commons and Sierra Hall",
+		"binCoordinatesX": -121.4261024,
+		"binCoordinatesY": 38.5668084,
+		"battery": 71,
+		"sensorStatus": "online",
+		"lastUpdatedMinutesAgo": 7,
+		"bins": [
+			{
+				"binID": 15501,
+				"triBinID": 155,
+				"binType": "LANDFILL",
+				"wasteHeight": 60.83
+			},
+			{
+				"binID": 15502,
+				"triBinID": 155,
+				"binType": "RECYCLING",
+				"wasteHeight": 47.74
+			},
+			{
+				"binID": 15503,
+				"triBinID": 155,
+				"binType": "COMPOST",
+				"wasteHeight": 62.37
+			}
+		]
+	},
+	{
+		"triBinID": 158,
+		"zone": "B",
+		"location": "In front of Draper Hall",
+		"binCoordinatesX": -121.424962,
+		"binCoordinatesY": 38.56719823,
+		"battery": 91,
+		"sensorStatus": "online",
+		"lastUpdatedMinutesAgo": 2,
+		"bins": [
+			{
+				"binID": 15801,
+				"triBinID": 158,
+				"binType": "LANDFILL",
+				"wasteHeight": 13.86
+			},
+			{
+				"binID": 15802,
+				"triBinID": 158,
+				"binType": "RECYCLING",
+				"wasteHeight": 20.79
+			},
+			{
+				"binID": 15803,
+				"triBinID": 158,
+				"binType": "COMPOST",
+				"wasteHeight": 30.03
+			}
+		]
+	},
+	{
+		"triBinID": 160,
+		"zone": "B",
+		"location": "In front of Hornet Dining Commons",
+		"binCoordinatesX": -121.4255936,
+		"binCoordinatesY": 38.56722456,
+		"battery": 66,
+		"sensorStatus": "online",
+		"lastUpdatedMinutesAgo": 4,
+		"bins": [
+			{
+				"binID": 16001,
+				"triBinID": 160,
+				"binType": "LANDFILL",
+				"wasteHeight": 66.22
+			},
+			{
+				"binID": 16002,
+				"triBinID": 160,
+				"binType": "RECYCLING",
+				"wasteHeight": 56.98
+			},
+			{
+				"binID": 16003,
+				"triBinID": 160,
+				"binType": "COMPOST",
+				"wasteHeight": 70.84
+			}
+		]
+	},
+	{
+		"triBinID": 166,
+		"zone": "B",
+		"location": "In front of American River Courtyard",
+		"binCoordinatesX": -121.4258576,
+		"binCoordinatesY": 38.56607651,
+		"battery": 79,
+		"sensorStatus": "online",
+		"lastUpdatedMinutesAgo": 5,
+		"bins": [
+			{
+				"binID": 16601,
+				"triBinID": 166,
+				"binType": "LANDFILL",
+				"wasteHeight": 36.96
+			},
+			{
+				"binID": 16602,
+				"triBinID": 166,
+				"binType": "RECYCLING",
+				"wasteHeight": 43.89
+			},
+			{
+				"binID": 16603,
+				"triBinID": 166,
+				"binType": "COMPOST",
+				"wasteHeight": 53.13
+			}
+		]
+	},
+	{
+		"triBinID": 167,
+		"zone": "B",
+		"location": "In front of ARC",
+		"binCoordinatesX": -121.4255877,
+		"binCoordinatesY": 38.56596983,
+		"battery": 23,
+		"sensorStatus": "offline",
+		"lastUpdatedMinutesAgo": 120,
+		"bins": [
+			{
+				"binID": 16701,
+				"triBinID": 167,
+				"binType": "LANDFILL",
+				"wasteHeight": 49.28
+			},
+			{
+				"binID": 16702,
+				"triBinID": 167,
+				"binType": "RECYCLING",
+				"wasteHeight": 40.04
+			},
+			{
+				"binID": 16703,
+				"triBinID": 167,
+				"binType": "COMPOST",
+				"wasteHeight": 54.67
+			}
+		]
+	}
+]
