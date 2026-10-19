@@ -51,7 +51,7 @@ public class GatewayDataService {
         boolean accepted = sensorService.processReading(reading, sensor, bin);
 
         if (accepted) {
-            historyService.addReading(reading);
+            historyService.addReading(reading, bin);
         }
     }
     /**
