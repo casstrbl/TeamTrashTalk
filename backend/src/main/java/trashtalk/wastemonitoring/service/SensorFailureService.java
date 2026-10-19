@@ -16,6 +16,11 @@ public class SensorFailureService {
             SensorReading reading,
             double binDepth) {
 
+        // A missing sensor reading is considered invalid.
+        if (reading == null) {
+            return true;
+        }
+
         return reading.getValue() <= 0
                 || reading.getValue() > binDepth;
     }
@@ -32,7 +37,10 @@ public class SensorFailureService {
         }
 
         long minutesSinceLastReading =
-                Duration.between(lastReadingTime, LocalDateTime.now()).toMinutes();
+                Duration.between(
+                        lastReadingTime,
+                        LocalDateTime.now()
+                ).toMinutes();
 
         return minutesSinceLastReading >= reportingIntervalMinutes * 2L;
     }
@@ -40,7 +48,10 @@ public class SensorFailureService {
     /**
      * Checks whether the sensor battery is at or below the allowed threshold.
      */
-    public boolean hasLowBattery(double batteryPercent, double threshold) {
+    public boolean hasLowBattery(
+            double batteryPercent,
+            double threshold) {
+
         return batteryPercent <= threshold;
     }
 
@@ -56,8 +67,13 @@ public class SensorFailureService {
             double batteryThreshold) {
 
         return hasImpossibleValue(reading, binDepth)
-                || hasMissingReading(lastReadingTime, reportingIntervalMinutes)
-                || hasLowBattery(batteryPercent, batteryThreshold);
+                || hasMissingReading(
+                        lastReadingTime,
+                        reportingIntervalMinutes
+                )
+                || hasLowBattery(
+                        batteryPercent,
+                        batteryThreshold
+                );
     }
-
 }
