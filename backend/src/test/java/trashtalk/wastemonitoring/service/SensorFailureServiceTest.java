@@ -158,6 +158,7 @@ class SensorFailureServiceTest {
                 )
         );
     }
+
     /**
      * Confirms that a battery exactly at the configured
      * threshold is treated as low battery.
@@ -170,6 +171,21 @@ class SensorFailureServiceTest {
                 sensorFailureService.hasLowBattery(
                         20.0,
                         20.0
+                )
+        );
+    }
+
+    /**
+     * Confirms that a missing sensor reading is detected
+     * as invalid instead of causing the application to crash.
+     */
+    @Test
+    void nullReadingIsImpossible() {
+
+        assertTrue(
+                sensorFailureService.hasImpossibleValue(
+                        null,
+                        77.0
                 )
         );
     }
