@@ -91,6 +91,30 @@ public class Bin {
 	}
 	
 	/**
+	 * Sets the bin's ID number
+	 * @param binID
+	 */
+	public void setBinID(int binID) {
+		this.binID = binID;
+	}
+
+	/**
+	 * Sets the parent tri-bin's ID number
+	 */
+	public void setTriBinID(int triBinID) {
+		this.triBinID = triBinID;
+	}
+	
+	
+	/**
+	 * Sets the bin's waste stream
+	 */
+	public void setBinType() {
+		this.binType = binType;
+	}
+	
+	
+	/**
 	 * Represents the different types of waste streams.
 	 */
 	public enum BinType{
