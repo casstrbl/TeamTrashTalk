@@ -81,6 +81,50 @@ public class BinRepository {
 	}
 
 
+    /**
+     * Persists a demo round in one transaction so the /api/tribins endpoint
+     * reads the same bin heights the fake sensor gateway just generated.
+     * Only online tribins are modified; offline readings remain unchanged.
+     */
+    public void saveSimulatedReadings(List<TriBin> triBins) {
+        String updateBin = "UPDATE bins SET wasteHeight = ? WHERE binID = ? AND triBinID = ?";
+        String updateTriBin = "UPDATE triBins SET lastUpdated = ? WHERE triBinID = ?";
+
+        try (Connection connection = DatabaseConfig.getConnection()) {
+            connection.setAutoCommit(false);
+            try (PreparedStatement binStatement = connection.prepareStatement(updateBin);
+                 PreparedStatement triBinStatement = connection.prepareStatement(updateTriBin)) {
+
+                for (TriBin triBin : triBins) {
+                    if (!"online".equalsIgnoreCase(triBin.getSensorStatus())) {
+                        continue;
+                    }
+                    for (Bin bin : triBin.getBins()) {
+                        binStatement.setDouble(1, bin.getWasteHeight());
+                        binStatement.setInt(2, bin.getBinID());
+                        binStatement.setInt(3, triBin.getTriBinID());
+                        binStatement.addBatch();
+                    }
+                    if (triBin.getLastUpdated() != null) {
+                        triBinStatement.setTimestamp(1, Timestamp.valueOf(triBin.getLastUpdated()));
+                        triBinStatement.setInt(2, triBin.getTriBinID());
+                        triBinStatement.addBatch();
+                    }
+                }
+
+                binStatement.executeBatch();
+                triBinStatement.executeBatch();
+                connection.commit();
+            } catch (SQLException error) {
+                connection.rollback();
+                throw error;
+            }
+        } catch (SQLException error) {
+            throw new RuntimeException("Could not save fake sensor readings", error);
+        }
+    }
+
+
 	// a blank zone comes back as the empty char
 	private static char toZone(String zone) {
 		if (zone == null || zone.isBlank()) {

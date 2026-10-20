@@ -1335,6 +1335,7 @@ function NoZonesNotice() {
 
 // "2 min ago" / "3 hours ago" -> minutes
 function minutesAgo(label: string) {
+  if (label.trim().toLowerCase() === 'just now') return 0
   const m = label.match(/(\d+)\s*(min|hour)/)
   return m ? Number(m[1]) * (m[2] === 'hour' ? 60 : 1) : Infinity
 }
@@ -1355,22 +1356,32 @@ export default function App() {
   const [staffList, setStaffList] = useState<StaffMember[]>(STAFF)
   const [apiBins, setApiBins] = useState<Tribin[]>(TRIBINS)
 
+  // Poll the local Java API so simulated sensor readings show up automatically.
+  // If the backend is unavailable, the site keeps its existing mock bins.
   useEffect(() => {
     const apiUrl = import.meta.env.VITE_API_URL ?? ''
+    const refreshMs = 5000 // five-second demo display refresh
+    let active = true
+    let requestInProgress = false
 
-    fetch(`${apiUrl}/api/tribins`)
-        .then(response => {
-          if (!response.ok) {
-            throw new Error('Failed to load bins')
-          }
-          return response.json()
-        })
-        .then(data => {
-          setApiBins(data as Tribin[])
-        })
-        .catch(error => {
-          console.error('Could not load /api/tribins:', error)
-        })
+    async function refreshBins() {
+      if (requestInProgress) return
+      requestInProgress = true
+      try {
+        const response = await fetch(`${apiUrl}/api/tribins`, { cache: 'no-store' })
+        if (!response.ok) throw new Error('Failed to load bins')
+        const data: Tribin[] = await response.json()
+        if (active) setApiBins(data)
+      } catch {
+        // Expected when the local backend isn't running: keep sample data.
+      } finally {
+        requestInProgress = false
+      }
+    }
+
+    void refreshBins()
+    const timer = window.setInterval(() => { void refreshBins() }, refreshMs)
+    return () => { active = false; window.clearInterval(timer) }
   }, [])
 
   // role and zones come from the staff list, so changes in admin apply right away.
