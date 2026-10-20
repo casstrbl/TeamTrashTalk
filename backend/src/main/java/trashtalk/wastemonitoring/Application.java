@@ -23,9 +23,10 @@ public class Application {
 		HistoryService historyService = new HistoryService();
 
 		try {
-			// Start a local web server on port 8080
+			// Default port is 8080; PORT can override it for local testing.
+            int serverPort = Integer.parseInt(System.getenv().getOrDefault("PORT", "8080"));
 			HttpServer server = HttpServer.create(
-					new InetSocketAddress(8080),
+					new InetSocketAddress(serverPort),
 					0
 			);
 
@@ -56,16 +57,22 @@ public class Application {
 			// Start the server
 			server.start();
 
-			System.out.println("Health: http://localhost:8080/api/health");
-			System.out.println("TriBins: http://localhost:8080/api/tribins");
-			System.out.println("History: http://localhost:8080/api/tribins/TB-2/history");
-			System.out.println("Pickups: http://localhost:8080/api/pickups");
+            // Optional Sprint 3 demo. Disabled unless explicitly enabled.
+            var fakeSensorScheduler =
+                    main.java.trashtalk.wastemonitoring.service.FakeSensorScheduler.startIfEnabled();
+            if (fakeSensorScheduler != null) {
+                Runtime.getRuntime().addShutdownHook(new Thread(fakeSensorScheduler::close));
+            }
+
+			System.out.println("Health: http://localhost:" + serverPort + "/api/health");
+			System.out.println("TriBins: http://localhost:" + serverPort + "/api/tribins");
+			System.out.println("History: http://localhost:" + serverPort + "/api/tribins/TB-2/history");
+			System.out.println("Pickups: http://localhost:" + serverPort + "/api/pickups");
 
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
-		
-		
+
 	}
 
 }
