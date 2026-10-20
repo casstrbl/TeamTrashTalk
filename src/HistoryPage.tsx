@@ -41,6 +41,8 @@ const STATUS_DOT: Record<Status, string> = {
   critical: 'bg-status-critical',
 }
 const STATUS_LABEL: Record<Status, string> = { ok: 'Good', warn: 'Warning', critical: 'Critical' }
+// status-ok / -warn / -critical as hex, for svg
+const STATUS_HEX: Record<Status, string> = { ok: '#4E8B5F', warn: '#D4A13A', critical: '#B4463F' }
 
 // one row from the history endpoint
 interface ApiReading {
@@ -176,29 +178,39 @@ function Message({ title, text }: { title: string; text: string }) {
   )
 }
 
-// tiny line for the compartment tiles
-function Sparkline({ points, color }: { points: Point[]; color: string }) {
-  const w = 120
-  const h = 36
-  if (points.length < 2) return <div className="h-9" />
-  const t0 = points[0].t
-  const span = points[points.length - 1].t - t0 || 1
-  // scaled to its own low and high (at least 10 points apart) so small changes still show
-  const lo = Math.min(...points.map(p => p.pct))
-  const hi = Math.max(lo + 10, ...points.map(p => p.pct))
-  const xy = downsample(points, 40).map((p): [number, number] => [(p.t - t0) / span * w, 3 + (1 - (p.pct - lo) / (hi - lo)) * (h - 6)])
+// chunky bars for the compartment tiles, newest on the right and brightest
+const BAR_COUNT = 14
+
+function MiniBars({ points, dark }: { points: Point[]; dark: boolean }) {
+  const bars = downsample(points, BAR_COUNT)
+  const empty = Math.max(0, BAR_COUNT - bars.length)
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full h-9" aria-hidden="true">
-      <path d={smoothPath(xy)} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-    </svg>
+    <div className="flex items-end justify-between gap-[3px] h-14" aria-hidden="true">
+      {Array.from({ length: empty }, (_, i) => (
+        <span key={`e${i}`} className={`flex-1 max-w-2.5 h-1.5 rounded-full ${dark ? 'bg-white/10' : 'bg-stone-100'}`} />
+      ))}
+      {bars.map((p, i) => {
+        const last = i === bars.length - 1
+        return (
+          <span
+            key={i}
+            className="flex-1 max-w-2.5 rounded-full transition-all duration-500"
+            style={{
+              height: `${Math.max(12, p.pct)}%`,
+              backgroundColor: STATUS_HEX[statusOf(p.pct)],
+              opacity: last ? 1 : dark ? 0.6 : 0.45,
+            }}
+          />
+        )
+      })}
+    </div>
   )
 }
 
 const PAD = { l: 36, r: 18, t: 40, b: 30 }
 
-function FillChart({ points, color, label, hoverT, onHover }: {
+function FillChart({ points, label, hoverT, onHover }: {
   points: Point[]
-  color: string
   label: string
   hoverT: number | null
   onHover: (t: number | null) => void
@@ -235,6 +247,17 @@ function FillChart({ points, color, label, hoverT, onHover }: {
   const pillText = `${Math.round(active.pct)}%`
   const pillW = 14 + pillText.length * 8
   const pillX = Math.min(W - PAD.r - pillW, Math.max(PAD.l, ax - pillW / 2))
+  const activeHex = STATUS_HEX[statusOf(active.pct)]
+
+  // green below 50, yellow to 80, red above, blended a little at each cutoff
+  const bandStops: [number, string][] = [
+    [0, STATUS_HEX.critical],
+    [(100 - CRITICAL_AT - 3) / 100, STATUS_HEX.critical],
+    [(100 - CRITICAL_AT + 3) / 100, STATUS_HEX.warn],
+    [(100 - WARN_AT - 3) / 100, STATUS_HEX.warn],
+    [(100 - WARN_AT + 3) / 100, STATUS_HEX.ok],
+    [1, STATUS_HEX.ok],
+  ]
 
   // fewer time labels on narrow screens so they don't run together
   const fracs = W < 480 ? [0, 0.5, 1] : [0, 0.25, 0.5, 0.75, 1]
@@ -261,33 +284,39 @@ function FillChart({ points, color, label, hoverT, onHover }: {
       onPointerLeave={() => onHover(null)}
     >
       <defs>
-        <linearGradient id="history-area" x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity={0.16} />
-          <stop offset="100%" stopColor={color} stopOpacity={0} />
+        {/* the line and fill take the status color of the height they're at */}
+        <linearGradient id="history-line" gradientUnits="userSpaceOnUse" x1={0} x2={0} y1={y(100)} y2={y(0)}>
+          {bandStops.map(([o, c], i) => <stop key={i} offset={o} stopColor={c} />)}
+        </linearGradient>
+        <linearGradient id="history-area" gradientUnits="userSpaceOnUse" x1={0} x2={0} y1={y(100)} y2={y(0)}>
+          {bandStops.map(([o, c], i) => <stop key={i} offset={o} stopColor={c} stopOpacity={0.22 - o * 0.17} />)}
         </linearGradient>
         <linearGradient id="history-bar" x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity={0.55} />
-          <stop offset="100%" stopColor={color} stopOpacity={0} />
+          <stop offset="0%" stopColor={activeHex} stopOpacity={0.6} />
+          <stop offset="100%" stopColor={activeHex} stopOpacity={0} />
         </linearGradient>
       </defs>
 
-      {/* percent labels, no gridlines, like the reference */}
+      {/* soft warning and critical zones behind everything */}
+      <rect x={PAD.l} y={y(100)} width={INNER_W} height={y(CRITICAL_AT) - y(100)} rx={10} fill="#F2DAD6" fillOpacity={0.45} />
+      <rect x={PAD.l} y={y(CRITICAL_AT)} width={INNER_W} height={y(WARN_AT) - y(CRITICAL_AT)} fill="#F3E3BF" fillOpacity={0.35} />
+      <text x={PAD.l + 10} y={y(100) + 15} textAnchor="start" fontSize={10} fontWeight={600} fill="#8E332D" fillOpacity={0.7}>Critical</text>
+      <text x={PAD.l + 10} y={y(CRITICAL_AT) + 15} textAnchor="start" fontSize={10} fontWeight={600} fill="#7A5A12" fillOpacity={0.7}>Warning</text>
+
+      {/* percent labels */}
       {[0, 25, 50, 75, 100].map(g => (
         <text key={g} x={PAD.l - 10} y={y(g) + 4} textAnchor="end" fontSize={11} fill="#5B6B60">{g}</text>
       ))}
 
-      {/* warning and critical levels, same cutoffs as the status colors */}
-      <line x1={PAD.l} x2={W - PAD.r} y1={y(WARN_AT)} y2={y(WARN_AT)} stroke="#D4A13A" strokeOpacity={0.6} strokeWidth={1} strokeDasharray="3 5" />
-      <line x1={PAD.l} x2={W - PAD.r} y1={y(CRITICAL_AT)} y2={y(CRITICAL_AT)} stroke="#B4463F" strokeOpacity={0.6} strokeWidth={1} strokeDasharray="3 5" />
-
       {area && <path d={area} fill="url(#history-area)" />}
 
       {/* soft bar dropping from the marked reading */}
-      <rect x={ax - 6} y={ay} width={12} height={Math.max(0, bottom - ay)} rx={6} fill="url(#history-bar)" />
+      <rect x={ax - 7} y={ay} width={14} height={Math.max(0, bottom - ay)} rx={7} fill="url(#history-bar)" />
 
-      <path d={line} fill="none" stroke={color} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+      <path d={line} fill="none" stroke="url(#history-line)" strokeWidth={3.5} strokeLinecap="round" strokeLinejoin="round" />
 
-      <circle cx={ax} cy={ay} r={6} fill="white" stroke={color} strokeWidth={2.5} />
+      <circle cx={ax} cy={ay} r={13} fill={activeHex} fillOpacity={0.18} />
+      <circle cx={ax} cy={ay} r={6.5} fill="white" stroke={activeHex} strokeWidth={3} />
 
       {/* value pill above the marked reading */}
       <rect x={pillX} y={ay - 36} width={pillW} height={24} rx={12} fill="#0F2E23" />
@@ -462,8 +491,8 @@ export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; 
                     <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: picked ? '#F4F1DE' : STREAM_COLOR[s] }} />
                     {s}
                   </span>
-                  <div className="my-2 sm:my-3">
-                    <Sparkline points={pts} color={picked ? '#B9C4B4' : STREAM_COLOR[s]} />
+                  <div className="my-3 sm:my-4">
+                    <MiniBars points={pts} dark={picked} />
                   </div>
                   <span className="flex items-baseline gap-1">
                     <span className="text-2xl sm:text-3xl font-semibold tabular-nums">{now ? Math.round(now.pct) : '–'}</span>
@@ -498,7 +527,7 @@ export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; 
 
               <div className="mt-2 -mx-1">
                 {drawn.length > 0 && (
-                  <FillChart points={drawn} color={STREAM_COLOR[shown]} label={shown} hoverT={hoverT} onHover={setHoverT} />
+                  <FillChart points={drawn} label={shown} hoverT={hoverT} onHover={setHoverT} />
                 )}
               </div>
 
