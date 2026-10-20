@@ -6,7 +6,7 @@ import com.sun.net.httpserver.HttpHandler;
 
 import main.java.trashtalk.wastemonitoring.dto.TriBinResponse;
 import main.java.trashtalk.wastemonitoring.model.TriBin;
-import main.java.trashtalk.wastemonitoring.respository.BinRepository;
+import main.java.trashtalk.wastemonitoring.repository.BinRepository;
 
 import java.io.IOException;
 import java.io.OutputStream;
