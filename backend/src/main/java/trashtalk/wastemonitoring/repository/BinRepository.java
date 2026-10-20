@@ -1,4 +1,4 @@
-package main.java.trashtalk.wastemonitoring.respository;
+package main.java.trashtalk.wastemonitoring.repository;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -81,6 +81,76 @@ public class BinRepository {
 	}
 
 
+	/**
+	 * Adds a new TriBin and its Bins to their respective database tables.
+	 * @param triBin
+	 * @throws SQLException
+	 */
+	public void addTriBin(TriBin triBin) throws SQLException {
+		
+		String triBinSql = """
+				INSERT INTO triBins
+				(triBinID, zone, location, binCoordinatesX, binCoordinatesY, battery, sensorStatus, lastUpdated)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+				""";
+		
+		String binSql = """
+				INSERT INTO bins
+				(binID, triBinID, binType, wasteHeight)
+				VALUES (?, ?, ?, ?)
+				""";
+		
+		try (Connection connection = DatabaseConfig.getConnection()) {
+			connection.setAutoCommit(false);
+			
+			try {
+				// Insert parent tri-bin first.
+				try (PreparedStatement statement = connection.prepareStatement(triBinSql)) {
+					statement.setInt(1, triBin.getTriBinID());
+					statement.setString(2, String.valueOf(triBin.getZone()));
+					statement.setString(3, triBin.getBinLocation());
+					statement.setDouble(4, triBin.getBinCoordinatesX());
+					statement.setDouble(5, triBin.getBinCoordinatesY());
+					statement.setInt(6, triBin.getBattery());
+					statement.setString(7, triBin.getSensorStatus());
+					
+					if (triBin.getLastUpdated() == null)
+						statement.setNull(8, java.sql.Types.TIMESTAMP);
+					
+					else
+						statement.setTimestamp(8, java.sql.Timestamp.valueOf(triBin.getLastUpdated()));
+					
+					statement.executeUpdate();
+				}
+				
+				// Insert the child bins.
+	            try (PreparedStatement statement = connection.prepareStatement(binSql)) {
+
+	                for (Bin bin : triBin.getBins()) {
+	                    statement.setInt(1, bin.getBinID());
+	                    statement.setInt(2, bin.getTriBinID());
+	                    statement.setString(3, bin.getBinType().name());
+	                    statement.setDouble(4, bin.getWasteHeight());
+	                    statement.addBatch();
+	                }
+
+	                statement.executeBatch();
+	            }
+
+	            connection.commit();
+
+	        } catch (SQLException | RuntimeException e) {
+	            connection.rollback();
+	            
+	            throw e;
+	            
+	        } finally {
+	            connection.setAutoCommit(true);
+	        }
+	    }
+	}
+	
+	
     /**
      * Persists a demo round in one transaction so the /api/tribins endpoint
      * reads the same bin heights the fake sensor gateway just generated.

@@ -9,30 +9,33 @@ import java.util.List;
 
 import main.java.trashtalk.wastemonitoring.config.DatabaseConfig;
 import main.java.trashtalk.wastemonitoring.model.Bin;
+import main.java.trashtalk.wastemonitoring.model.StaffMember;
 import main.java.trashtalk.wastemonitoring.model.TriBin;
 
 public class DatabaseInitializer {
-
+	
 	/**
      * Creates the database tables if they do not already exist.
      */
 	public static void initializeDatabase() {
-
+		
 		createTables();
-
-		if (isDatabaseEmpty()) {
-			loadInitialData();
-		}
+		
+		if (isTriBinsEmpty())
+			loadInitialTriBinData();
+		
+		if (isStaffEmpty())
+			loadInitialStaffData();
 	}
-
-
+	
+	
 	private static void createTables() {
-
+	
 		/**
 		 * Creates new table for TriBin data if one does not already exist
 		 */
 		String createTriBinsTable = """
-				CREATE TABLE IF NOT EXISTS triBins(
+				CREATE TABLE IF NOT EXISTS triBins (
 				triBinID INT PRIMARY KEY,
 				zone CHAR,
 				location VARCHAR(255),
@@ -44,48 +47,93 @@ public class DatabaseInitializer {
 				)
 				""";
 
-		// adds the sensor columns to databases made before they existed
-		String addSensorColumns = """
-				ALTER TABLE triBins ADD COLUMN IF NOT EXISTS battery INT;
-				ALTER TABLE triBins ADD COLUMN IF NOT EXISTS sensorStatus VARCHAR(10);
-				ALTER TABLE triBins ADD COLUMN IF NOT EXISTS lastUpdated TIMESTAMP;
-				""";
-
+		/**
+		 * Adds the sensor columns individually (for compatibility with 
+		 * both H2 and PostgreSQL) to databases made before they existed
+		 */
+		String[] addSensorColumns = {
+			    "ALTER TABLE triBins ADD COLUMN IF NOT EXISTS battery INT",
+			    "ALTER TABLE triBins ADD COLUMN IF NOT EXISTS sensorStatus VARCHAR(10)",
+			    "ALTER TABLE triBins ADD COLUMN IF NOT EXISTS lastUpdated TIMESTAMP"
+			};
+	
 		/**
 		 * Creates new table for Bin data if one does not already exist
-		 */
+		 */	
 		String createBinsTable = """
 				CREATE TABLE IF NOT EXISTS bins (
 				binID INT PRIMARY KEY,
 				triBinID INT NOT NULL,
 				binType VARCHAR(20) NOT NULL,
 				wasteHeight DOUBLE PRECISION,
-
+				
 				FOREIGN KEY (triBinID)
 					REFERENCES triBins(triBinID)
 					)
 			""";
-
+		
+		/**
+		 * Creates new table for Alert data if one does not already exist
+		 */
+		String createAlertsTable = """
+				CREATE TABLE IF NOT EXISTS alerts (
+				id INT PRIMARY KEY,
+				binID INT NOT NULL,
+				triBinID INT NOT NULL,
+				zone CHAR,
+				message TEXT,
+				severity VARCHAR(20),
+				time TIMESTAMP
+				)
+				""";
+		
+		/**
+		 * Creates new table for StaffMember data if one does not already exist
+		 */
+		String createStaffMembersTable = """
+				CREATE TABLE IF NOT EXISTS staff (
+				id INT PRIMARY KEY,
+				name VARCHAR(50),
+				role VARCHAR(20),
+				zone CHAR,
+				email TEXT
+				)
+				""";
+	
 		try (Connection connection = DatabaseConfig.getConnection();
-
+				
 				// Prepare the SQL statement for creating the tri-bins table
 				PreparedStatement triBinStatement = connection.prepareStatement(createTriBinsTable);
-
+				
 				// Prepare the SQL statement for creating the bins table
-				PreparedStatement binStatement = connection.prepareStatement(createBinsTable)) {
-
+				PreparedStatement binStatement = connection.prepareStatement(createBinsTable);
+						
+				// Prepare the SQL statement for creating the alerts table
+					PreparedStatement alertStatement = connection.prepareStatement(createAlertsTable);
+				
+				// Prepare the SQL statement for creating the staff members table
+				PreparedStatement staffMemberStatement = connection.prepareStatement(createStaffMembersTable)) {
+		
 				// Execute the SQL statement to create the tri-bins table
 				triBinStatement.execute();
 
-				// make sure older databases have the sensor columns
-				try (Statement alterStatement = connection.createStatement()) {
-					alterStatement.execute(addSensorColumns);
-				}
-
 				// Execute the SQL statement to create the bins table
 				binStatement.execute();
-
-                // Keep sensor readings even when the server restarts.
+		
+				// Execute the SQL statement to create the alerts table
+				alertStatement.execute();
+				
+				// Execute the SQL statement to createthe staff members table
+				staffMemberStatement.execute();
+				
+				// make sure older databases have the  sensor columns
+				try (Statement alterStatement = connection.createStatement()) {
+				    for (String sql : addSensorColumns) {
+				        alterStatement.executeUpdate(sql);
+				    }
+				}
+				
+				// Keep sensor readings even when the server restarts.
                 try (Statement historyStatement = connection.createStatement()) {
                     historyStatement.execute("""
                         CREATE TABLE IF NOT EXISTS sensor_history (
@@ -99,11 +147,9 @@ public class DatabaseInitializer {
                         )
                         """);
                 }
-
-
-
+		
 		} catch (SQLException e) {
-
+			
 			// Handle any database errors that occur while creating the tables
 			throw new RuntimeException(
 				"Error creating database tables.", e
@@ -112,33 +158,33 @@ public class DatabaseInitializer {
 	}
 
 
-private static void loadInitialData() {
-
-	// Load the initial tri-bin data from the json file
+private static void loadInitialTriBinData() {
+	
+	// Load the initial tri-bin data from tribins.json
 	List<TriBin> triBins = BinDataLoader.loadTriBins();
-
+	
 	// SQL statement to insert a TriBin into the triBins table
 	String insertTriBin = """
 			INSERT INTO triBins
 			(triBinID, zone, location, binCoordinatesX, binCoordinatesY, battery, sensorStatus, lastUpdated)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			""";
-
+	
 	// SQL statement to insert an individual bin into the bins table
 	String insertBin = """
 			INSERT INTO bins
 			(binID, triBinID, binType, wasteHeight)
 			VALUES (?, ?, ?, ?)
 			""";
-
+	
 	// Open database connection and prepare the SQL statements
 	try (Connection connection = DatabaseConfig.getConnection();
 			PreparedStatement triBinStatement = connection.prepareStatement(insertTriBin);
-			PreparedStatement binStatement = connection.prepareStatement(insertBin)) {
-
+			PreparedStatement binStatement = connection.prepareStatement(insertBin);) {
+		
 		// Loop through each TriBin loaded from the json file
 		for (TriBin triBin : triBins) {
-
+			
 			// Set the values for the current TriBin
 			triBinStatement.setInt(1, triBin.getTriBinID());
 			// postgres rejects the empty char, so a blank zone is saved as null
@@ -152,25 +198,24 @@ private static void loadInitialData() {
 
 			// Insert the TriBin into the database
 			triBinStatement.executeUpdate();
-
-
+			
+			
 			// Loop through the three bins belonging to the current TriBin
 			for (Bin bin : triBin.getBins()) {
-
+				
 				// Set the values for the current bin
 				binStatement.setInt(1, bin.getBinID());
 				binStatement.setInt(2, triBin.getTriBinID());
 				binStatement.setString(3, bin.getBinType().name());
 				binStatement.setDouble(4, bin.getWasteHeight());
-
+				
 				// Insert the bin into the database
 				binStatement.executeUpdate();
 			}
 		}
-
-
+				
 	} catch (SQLException e) {
-
+		
 		// Handle any database errors that occur while loading the initial data
 		throw new RuntimeException(
 				"Error loading initial bin data.", e
@@ -178,7 +223,48 @@ private static void loadInitialData() {
 	}
 }
 
-private static boolean isDatabaseEmpty() {
+
+private static void loadInitialStaffData() {
+	
+	// Load initial staff data from staff.json.
+	List<StaffMember> staffMembers = StaffDataLoader.loadStaffMembers();
+	
+	// SQL statement to insert a staff member into the staffMembers table
+	String insertStaffMember = """
+			INSERT INTO staff
+			(id, name, role, zone, email)
+			VALUES (?, ?, ?, ?, ?)
+			""";
+	
+	// Open database connection and prepare the SQL statements
+	try (Connection connection = DatabaseConfig.getConnection();
+			PreparedStatement staffMemberStatement = connection.prepareStatement(insertStaffMember);) {
+	
+	
+		// Loop through each staff member loaded from the json file.
+		for (StaffMember staffMember : staffMembers) {
+								
+			// Set the values for the current StaffMember
+			staffMemberStatement.setInt(1, staffMember.getStaffID());
+			staffMemberStatement.setString(2, staffMember.getName());
+			staffMemberStatement.setString(3, staffMember.getRole());
+			staffMemberStatement.setString(4, new String(staffMember.getZone()));
+			staffMemberStatement.setString(5, staffMember.getEmail());
+								
+			// Insert the staff member into the database.
+			staffMemberStatement.executeUpdate();
+		}
+	} catch (SQLException e) {
+	
+		// Handle any database errors that occur while loading the initial data
+		throw new RuntimeException(
+				"Error loading initial staff data.", e
+			);
+	}
+}
+
+
+private static boolean isTriBinsEmpty() {
 
 	// SQL statement that counts the number of TriBins currently in the database
     String sql = "SELECT COUNT(*) FROM triBins";
@@ -188,15 +274,41 @@ private static boolean isDatabaseEmpty() {
          PreparedStatement statement = connection.prepareStatement(sql);
          var resultSet = statement.executeQuery()) {
 
-        // Move the ResultSet sursor to the first (and only) row
+    	// Move the ResultSet cursor to the first (and only) row
         resultSet.next();
 
         // Return true if the triBins table contains no data
         return resultSet.getInt(1) == 0;
 
     } catch (SQLException e) {
+    	
+    	// Handle any database errors that occur while checking the database
+        throw new RuntimeException(
+            "Error checking database.",
+            e
+        );
+    }
+}
 
-        // Handle any database errors that occur while checking the database
+private static boolean isStaffEmpty() {
+
+	// SQL statement that counts the number of StaffMembers currently in the database
+    String sql = "SELECT COUNT(*) FROM staff";
+
+    // Open a database connection and execute the query
+    try (Connection connection = DatabaseConfig.getConnection();
+         PreparedStatement statement = connection.prepareStatement(sql);
+         var resultSet = statement.executeQuery()) {
+
+    	// Move the ResultSet cursor to the first (and only) row
+        resultSet.next();
+
+        // Return true if the staff table contains no data
+        return resultSet.getInt(1) == 0;
+
+    } catch (SQLException e) {
+    	
+    	// Handle any database errors that occur while checking the database
         throw new RuntimeException(
             "Error checking database.",
             e

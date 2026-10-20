@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit;
 import main.java.trashtalk.wastemonitoring.model.Bin;
 import main.java.trashtalk.wastemonitoring.model.Sensor;
 import main.java.trashtalk.wastemonitoring.model.TriBin;
-import main.java.trashtalk.wastemonitoring.respository.BinRepository;
+import main.java.trashtalk.wastemonitoring.repository.BinRepository;
 
 /**
  * Sprint 3 demo: pretend that each online ultrasonic sensor sends a reading
