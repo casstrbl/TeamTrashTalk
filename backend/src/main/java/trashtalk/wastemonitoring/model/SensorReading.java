@@ -26,6 +26,14 @@ public class SensorReading {
         this.timestamp = LocalDateTime.now();
     }
 
+    /** Reconstruct a historical reading using its original timestamp. */
+    public SensorReading(int sensorID, double value, String unit, LocalDateTime timestamp) {
+        this.sensorID = sensorID;
+        this.value = value;
+        this.unit = unit;
+        this.timestamp = timestamp;
+    }
+
     public int getSensorID() {
         return sensorID;
     }
