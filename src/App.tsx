@@ -10,6 +10,7 @@ import logoUrl from './imports/logo.png'
 import { mockBins } from './data/mockBins'
 import { campusBoundary } from './data/campusBoundary'
 import { campusBuildings } from './data/campusBuildings'
+import HistoryPage from './HistoryPage'
 
 // fill bands: green 0-49, yellow 50-79, red 80-100
 const WARN_AT = 50
@@ -1661,7 +1662,7 @@ export default function App() {
           )}
 
           {page === 'pickup' && <ComingSoon title="Pickup List" icon="listCheck" text="The bins to empty next, in pickup order, will live here." />}
-          {page === 'history' && <ComingSoon title="History" icon="chartLine" text="Past fill levels and pickups for each bin will live here." />}
+          {page === 'history' && <HistoryPage bins={myBins} sampleData={sampleData} />}
 
           {page === 'details' && (
             <>
