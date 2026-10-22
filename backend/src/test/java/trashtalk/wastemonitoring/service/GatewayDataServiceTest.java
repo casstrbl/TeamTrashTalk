@@ -15,20 +15,19 @@ class GatewayDataServiceTest {
     @Test
     void receiveReadingUpdatesMatchingBin() {
 
-        // Create a recycling bin
         Bin bin = new Bin(1, 1, Bin.BinType.RECYCLING);
 
-        // Create an ultrasonic sensor for the recycling bin
         Sensor sensor = new Sensor(
                 101,
                 Sensor.SensorType.ULTRASONIC
         );
 
-        // Assign the sensor to the recycling bin
         sensor.assignToBin(bin);
 
-        // Simulate gateway data being received
         HistoryService historyService = new HistoryService();
+
+        // Start this test with an empty history table.
+        historyService.clearHistory();
 
         GatewayDataService gatewayDataService =
                 new GatewayDataService(historyService);
@@ -41,10 +40,10 @@ class GatewayDataServiceTest {
                 bin
         );
 
-        // Confirm that the reading reached the bin
         assertEquals(25.5, bin.getWasteHeight());
         assertEquals(1, historyService.getHistory().size());
     }
+
     @Test
     void receiveRequestUpdatesMatchingBin() {
 
@@ -88,6 +87,9 @@ class GatewayDataServiceTest {
         sensor.assignToBin(bin);
 
         HistoryService historyService = new HistoryService();
+
+        // Start this test with an empty history table.
+        historyService.clearHistory();
 
         GatewayDataService gatewayDataService =
                 new GatewayDataService(historyService);

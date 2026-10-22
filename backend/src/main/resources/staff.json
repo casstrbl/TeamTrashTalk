@@ -1,9 +1,9 @@
 [
 	{
-		"staffID":, 
-		"name": ,
-		"role": ,
-		"zone": ,
-		"email": 
+		"staffID": 1,
+		"name": "Test Staff",
+		"role": "Collector",
+		"zones": ["A"],
+		"email": "test@example.com"
 	}
 ]
