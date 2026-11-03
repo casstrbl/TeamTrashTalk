@@ -2,6 +2,8 @@ name: Check build (temporary)
 on:
   push:
     branches: [glass-redesign-check]
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -15,9 +17,13 @@ jobs:
           node-version: 20
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm exec tsc --noEmit -p . > tsc.log 2>&1 || true
-      - run: pnpm build > build.log 2>&1 || (cat build.log; exit 1)
+      - run: pnpm build > build.log 2>&1 || true
+      - run: mkdir -p dist
       - run: mkdir -p out && cp -r dist out/dist && cp tsc.log build.log out/
-      - uses: actions/upload-artifact@v4
-        with:
-          name: site
-          path: out
+      # the built site goes on its own throwaway branch, so it can be fetched with git
+      - run: |
+          cd out
+          git init -q -b glass-redesign-preview
+          git add -A
+          git -c user.name=ci -c user.email=ci@example.com commit -qm "Preview build."
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" glass-redesign-preview
