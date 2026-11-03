@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import BinLogo from './BinLogo'
+import Aura from './Aura'
 
 // welcome, log in and create account screens (the dark aura look from figma).
 // demo sign-in only: any password works for an email on the staff list. real accounts and
@@ -71,10 +72,11 @@ function PasswordInput({ value, onChange, autoComplete }: { value: string; onCha
   )
 }
 
-export default function LoginPage({ staff, onLogin, onCreate }: {
+export default function LoginPage({ staff, onLogin, onCreate, onScrollTop }: {
   staff: LoginStaff[]
   onLogin: (staffId: string) => void
   onCreate: (name: string, email: string) => void
+  onScrollTop: () => void // back to the top (the app's smooth scroller) when the screen changes
 }) {
   const [view, setView] = useState<View>('welcome')
   const [name, setName] = useState('')
@@ -86,6 +88,7 @@ export default function LoginPage({ staff, onLogin, onCreate }: {
     setView(next)
     setError('')
     setPassword('')
+    onScrollTop()
   }
 
   function submitLogin(e: FormEvent) {
@@ -107,7 +110,8 @@ export default function LoginPage({ staff, onLogin, onCreate }: {
   }
 
   return (
-    <div className="aura-night min-h-dvh text-white flex flex-col">
+    <div className="relative min-h-dvh text-white flex flex-col">
+      <Aura night />
       <main className="flex-1 flex flex-col w-full max-w-[520px] mx-auto px-6 pt-[max(24px,env(safe-area-inset-top))] pb-[max(32px,env(safe-area-inset-bottom))] md:justify-center">
         {view === 'welcome' && (
           <div className="flex-1 md:flex-none flex flex-col justify-end md:justify-center gap-10 animate-page-in motion-reduce:animate-none">
@@ -118,7 +122,6 @@ export default function LoginPage({ staff, onLogin, onCreate }: {
                 <span className="text-lime font-semibold">all bins</span><br />
                 in one place.
               </h1>
-              <p className="text-white/70 text-base md:text-lg max-w-sm">Live fill levels for every tribin on campus, for the Sac State Office of Sustainability.</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <button
@@ -177,7 +180,6 @@ export default function LoginPage({ staff, onLogin, onCreate }: {
               <div className="space-y-3">
                 <BinLogo size={56} glow className="-ml-1.5" />
                 <h1 className="text-4xl md:text-5xl font-semibold tracking-tight">Create account</h1>
-                <p className="text-white/70">New accounts start as viewers. An editor adds you to your zones, then your bins show up.</p>
               </div>
               <div className="space-y-5">
                 <Field label="Your name">

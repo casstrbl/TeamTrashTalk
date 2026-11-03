@@ -117,10 +117,9 @@ export default function PickupPage({ bins, zones, zoneFilter, onZoneFilter, thre
 
   return (
     <>
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-3xl lg:text-4xl font-bold text-pine tracking-tight">Pickup List</h1>
-          <p className="text-sm md:text-base text-pine-muted mt-1 max-w-xl">Fullest bins first. Tap <span className="font-semibold text-pine">Emptied</span> when you’re done, and we’ll save who did it and when.</p>
         </div>
         <button
           onClick={exportToday}
@@ -156,7 +155,7 @@ export default function PickupPage({ bins, zones, zoneFilter, onZoneFilter, thre
               const top = fullestOf(b)
               const critical = top.fill >= CRITICAL_AT
               return (
-                <li key={b.id} className="glass rounded-3xl flex items-center gap-3 sm:gap-4 pl-4 pr-3 sm:pr-4 py-4">
+                <li key={b.id} className="animate-page-in motion-reduce:animate-none glass rounded-3xl flex items-center gap-3 sm:gap-4 pl-4 pr-3 sm:pr-4 py-4">
                   <span className={`w-10 h-10 rounded-full shrink-0 flex items-center justify-center font-mono font-bold ${critical ? 'bg-critical-soft text-status-critical-ink' : 'bg-warn-soft text-status-warn-ink'}`}>{i + 1}</span>
                   <button onClick={() => onShowOnMap(b.id)} className="flex-1 min-w-0 text-left" title="Show on map">
                     <span className="flex flex-wrap items-center gap-2">
@@ -203,7 +202,7 @@ export default function PickupPage({ bins, zones, zoneFilter, onZoneFilter, thre
                   ? `Sensor still reads ${reading}%, waiting for a new reading`
                   : `Sensor now reads ${reading}%`
               return (
-                <li key={p.id} className="glass tint-olive rounded-3xl flex items-center gap-3 sm:gap-4 px-4 py-3.5">
+                <li key={p.id} className="animate-page-in motion-reduce:animate-none glass tint-olive rounded-3xl flex items-center gap-3 sm:gap-4 px-4 py-3.5">
                   <span className="text-status-ok"><Icon d={CIRCLE_CHECK} size={26} /></span>
                   <div className="flex-1 min-w-0">
                     <p className="font-bold text-pine truncate">{p.binName} · {p.location}</p>

@@ -7,6 +7,7 @@ import 'leaflet/dist/leaflet.css'
 import Lenis from 'lenis'
 import 'lenis/dist/lenis.css'
 import BinLogo from './BinLogo'
+import Aura from './Aura'
 import LoginPage from './LoginPage'
 import PickupPage from './PickupPage'
 import type { PickupBin, PickupRecord } from './PickupPage'
@@ -102,7 +103,7 @@ const ALL_ZONES: Zone[] = [
     ...new Set(TRIBINS.map(bin => bin.zone))
 ]
 
-// what sets off an alert. editors change these on the admin page
+// what sets off an alert. everyone picks their own on the settings page
 interface AlertSettings {
   fillOn: boolean
   fillAt: number // percent, any compartment
@@ -117,7 +118,7 @@ const DEFAULT_ALERT_SETTINGS: AlertSettings = { fillOn: true, fillAt: 80, offlin
 // changes survive a reload), alert settings and pickup records. it's per browser, and can be
 // missing or blocked (private mode), so every read and write is guarded. the backend should own
 // all of this later
-const STORE = { session: 'tt-session', staff: 'tt-staff-v1', alerts: 'tt-alert-settings-v1', pickups: 'tt-pickups-v1' }
+const STORE = { session: 'tt-session', staff: 'tt-staff-v1', alerts: 'tt-alert-settings-v2', pickups: 'tt-pickups-v1' }
 
 function loadStored<T>(key: string, fallback: T): T {
   try {
@@ -521,8 +522,8 @@ function BinDetailModal({ bin, onClose }: { bin: Tribin; onClose: () => void }) 
   }, [onClose])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-forest/30 backdrop-blur-md" onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-label={bin.name} className="glass-blur bg-white/85! rounded-[28px] shadow-2xl max-w-sm w-full p-6" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-forest/30 backdrop-blur-md animate-fade-in motion-reduce:animate-none" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label={bin.name} className="glass-blur bg-white/85! rounded-[28px] shadow-2xl max-w-sm w-full p-6 animate-pop-in motion-reduce:animate-none" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-start mb-4">
           <div>
             <h2 className="font-display text-xl font-bold text-forest">{bin.name}</h2>
@@ -917,7 +918,7 @@ const NAV_ITEMS: { page: Page; label: string; icon: keyof typeof ICONS; editorsO
   { page: 'details', label: 'Details', icon: 'layoutGrid' },
   { page: 'pickup', label: 'Pickup List', icon: 'listCheck' },
   { page: 'history', label: 'History', icon: 'chartLine' },
-  { page: 'admin', label: 'Admin', icon: 'settings', editorsOnly: true },
+  { page: 'admin', label: 'Settings', icon: 'settings' },
 ]
 
 // slim sidebar on wide landscape screens (desk: ipad landscape, desktop), floating pill at the
@@ -999,7 +1000,7 @@ function TopBar({ userName, role, greeting, syncedLabel, alertCount, sampleData,
           </span>
         </button>
         {menuOpen && (
-          <div role="menu" className="absolute left-0 top-full mt-2 z-50 w-60 glass-blur bg-white/[0.97]! rounded-2xl p-1.5 shadow-xl">
+          <div role="menu" className="absolute left-0 top-full mt-2 z-50 w-60 glass-blur bg-white/[0.97]! rounded-2xl p-1.5 shadow-xl origin-top-left animate-pop-in motion-reduce:animate-none">
             <button role="menuitem" className={menuItem} onClick={() => { setMenuOpen(false); onSwitchUser() }}>
               Switch demo user
               <span className="block text-xs font-medium text-pine-muted -mt-0.5 pb-1">to {nextDemoUser}</span>
@@ -1423,7 +1424,8 @@ function Stepper({ value, min, max, label, disabled, onChange }: {
   )
 }
 
-// admin: what sets off an alert. the fill level is the same "alert at" as on the details page
+// settings: what sets off an alert, for the signed-in person only. the fill level is the same
+// "alert at" as on the details page
 function AlertSettingsCard({ settings, onChange }: { settings: AlertSettings; onChange: (next: AlertSettings) => void }) {
   const set = (patch: Partial<AlertSettings>) => onChange({ ...settings, ...patch })
   const rows: { title: string; text: string; on: boolean; toggle: (on: boolean) => void; stepper?: ReactNode }[] = [
@@ -1435,7 +1437,7 @@ function AlertSettingsCard({ settings, onChange }: { settings: AlertSettings; on
       stepper: <Stepper value={settings.fillAt} min={10} max={100} label="full alert level" disabled={!settings.fillOn} onChange={v => set({ fillAt: v })} />,
     },
     {
-      title: 'Sensor stops sending',
+      title: 'Offline sensors',
       text: 'Alert when a bin’s sensor goes offline.',
       on: settings.offlineOn,
       toggle: on => set({ offlineOn: on }),
@@ -1457,7 +1459,7 @@ function AlertSettingsCard({ settings, onChange }: { settings: AlertSettings; on
   return (
     <div className={`${TILE} glass`}>
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-lg font-bold text-pine">Alerts &amp; notifications</h2>
+        <h2 className="text-lg font-bold text-pine">Your alerts &amp; notifications</h2>
         <button
           onClick={() => onChange(DEFAULT_ALERT_SETTINGS)}
           className="ml-auto text-sm font-bold text-pine-muted hover:text-pine min-h-11 px-2 -mr-2 transition-colors"
@@ -1465,7 +1467,7 @@ function AlertSettingsCard({ settings, onChange }: { settings: AlertSettings; on
           Reset
         </button>
       </div>
-      <p className="text-[13px] font-medium text-pine-muted mt-0.5 mb-2">Saved on this device for now. Once the backend stores them, they’ll apply to everyone.</p>
+      <p className="text-[13px] font-medium text-pine-muted mt-0.5 mb-2">These only change your own alerts. Saved on this device for now, until the backend can store them.</p>
       <div>
         {rows.map(r => (
           <div key={r.title} className="flex flex-wrap sm:flex-nowrap items-center gap-x-4 gap-y-2 py-3 border-t border-pine/[0.07]">
@@ -1513,7 +1515,18 @@ export default function App() {
   const [filterZone, setFilterZone] = useState<Zone | 'All'>('All')
   const [sortBy, setSortBy] = useState<'fill' | 'zone' | 'status' | 'name'>('fill')
   const [filterStatus, setFilterStatus] = useState<Status | 'All'>('All')
-  const [alertSettings, setAlertSettings] = useState<AlertSettings>(() => loadStored(STORE.alerts, DEFAULT_ALERT_SETTINGS))
+  // each person's own alert settings, by staff id
+  const [alertSettingsByUser, setAlertSettingsByUser] = useState(() => loadStored<Record<string, Partial<AlertSettings>>>(STORE.alerts, {}))
+  const settingsKey = sessionId ?? ''
+  const alertSettings = useMemo<AlertSettings>(
+    () => ({ ...DEFAULT_ALERT_SETTINGS, ...alertSettingsByUser[settingsKey] }),
+    [alertSettingsByUser, settingsKey],
+  )
+  const setAlertSettings = (next: AlertSettings | ((prev: AlertSettings) => AlertSettings)) =>
+    setAlertSettingsByUser(prev => {
+      const cur = { ...DEFAULT_ALERT_SETTINGS, ...prev[settingsKey] }
+      return { ...prev, [settingsKey]: typeof next === 'function' ? next(cur) : next }
+    })
   const alertThreshold = alertSettings.fillAt
   const setAlertThreshold = (next: number | ((t: number) => number)) =>
     setAlertSettings(prev => ({ ...prev, fillAt: typeof next === 'function' ? next(prev.fillAt) : next }))
@@ -1526,7 +1539,7 @@ export default function App() {
   const [staffList, setStaffList] = useState<StaffMember[]>(() => loadStoredList(STORE.staff, STAFF))
 
   useEffect(() => { saveStored(STORE.staff, staffList) }, [staffList])
-  useEffect(() => { saveStored(STORE.alerts, alertSettings) }, [alertSettings])
+  useEffect(() => { saveStored(STORE.alerts, alertSettingsByUser) }, [alertSettingsByUser])
   // only keep the last two weeks of pickups in the browser
   useEffect(() => { saveStored(STORE.pickups, pickups.filter(p => Date.now() - p.at < 14 * 24 * 60 * 60 * 1000)) }, [pickups])
   useEffect(() => {
@@ -1771,10 +1784,18 @@ export default function App() {
     setPickups(prev => prev.filter(p => p.id !== recordId))
   }
 
+  // straight to the top, through the smooth scroller so the two never disagree
+  function scrollToTop() {
+    const lenis = lenisRef.current
+    if (lenis) lenis.scrollTo(0, { immediate: true, force: true })
+    else window.scrollTo(0, 0)
+  }
+
   function logIn(staffId: string) {
     setSessionId(staffId)
     setPage('summary')
     setDismissedIds([])
+    scrollToTop()
   }
 
   // new accounts start as viewers with no zones, until an editor assigns them
@@ -1787,6 +1808,7 @@ export default function App() {
   function logOut() {
     setSessionId(null)
     setEditingStaff(null)
+    scrollToTop()
   }
 
   const DEMO_CYCLE: Record<string, string> = { s1: 's2', s2: 's3' }
@@ -1838,13 +1860,13 @@ export default function App() {
   }
 
   if (!signedInUser) {
-    return <LoginPage staff={staffList} onLogin={logIn} onCreate={createAccount} />
+    return <LoginPage staff={staffList} onLogin={logIn} onCreate={createAccount} onScrollTop={scrollToTop} />
   }
 
   return (
     <div className="min-h-screen font-sans">
       {/* the soft color glows behind every page */}
-      <div className="aura" aria-hidden="true" />
+      <Aura />
       <NavRail page={page} role={currentRole} onNavigate={setPage} />
       {/* left padding clears the sidebar on desk; the footer's clears the floating tab bar otherwise */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8 desk:pl-[calc(88px+2rem)] desk:pr-8 pt-5 desk:pt-8 pb-6 space-y-5 md:space-y-6">
@@ -1994,7 +2016,8 @@ export default function App() {
                     <span className="ml-auto text-[13px] font-bold text-pine-muted">{filteredBins.length} bin{filteredBins.length !== 1 ? 's' : ''}</span>
                   </div>
 
-                  {/* grid or map */}
+                  {/* grid or map. keyed by the view, so switching cards and map dissolves */}
+                  <div key={viewMode} className="animate-page-in motion-reduce:animate-none">
                   {shownCount === 0 ? (
                     <div className="glass rounded-[28px] py-16 text-center text-pine-muted">
                       <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-2"><path d="M4 7h16M9 7V4h6v3M10 11v6M14 11v6M6 7l1 13h10l1-13"/></svg>
@@ -2017,6 +2040,7 @@ export default function App() {
                       ))}
                     </Reveal>
                   )}
+                  </div>
                 </div>
 
                 {/* right: alerts panel */}
@@ -2213,11 +2237,14 @@ export default function App() {
             </div>
           )}
 
-          {/* viewers can't open admin */}
+          {/* viewers: just their own alert settings, staff and zones stay editors only */}
           {page === 'admin' && currentRole !== 'editor' && (
-            <div className="glass rounded-[28px] py-20 text-center text-pine-muted">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-3"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
-              <p className="text-sm font-semibold">Editor access required.</p>
+            <div className="space-y-5 md:space-y-6">
+              <div>
+                <h1 className="text-3xl lg:text-4xl font-bold text-pine tracking-tight">Settings</h1>
+                <p className="text-sm md:text-[15px] font-medium text-pine-muted mt-1">Choose which alerts you get.</p>
+              </div>
+              <AlertSettingsCard settings={alertSettings} onChange={setAlertSettings} />
             </div>
           )}
         </PageScope>
