@@ -48,8 +48,8 @@ If the backend isn't running, the site falls back to the sample bins in `src/dat
 
 - **Login:** a welcome screen with Log in and Create account. It's a demo sign-in for now: any password works for an email on the staff list (person1@csus.edu is an editor, person2 and person3 are viewers). New accounts start as viewers with no zones, until an editor adds them to one.
 - **Pickup List:** bins at the alert level or higher, fullest first. Tapping "Emptied" saves who did it and when, with Undo and a CSV export.
-- **History:** pick a bin from the chips at the top, or "All bins" for the overview. The readings table can be exported as a CSV.
-- **Staff & Zones:** editors can now turn each kind of alert on or off and change the full and low-battery levels.
+- **History:** type a bin number or place in the box at the top, or open it and pick a bin. "All bins" shows the overview. The readings table can be exported as a CSV.
+- **Settings (gear tab):** everyone can turn each kind of alert on or off for themselves and change the full and low-battery levels. Editors also see Staff & Zones there.
 - Sign-ins, new accounts, pickups and alert settings are saved in the browser only, so they don't sync between devices yet. They need backend endpoints (login, pickups, settings) before the real launch.
 
 ## Sprint 3: Fake sensor timer (Waiss)
