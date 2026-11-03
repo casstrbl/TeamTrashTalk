@@ -189,7 +189,34 @@ function nearest(points: Point[], t: number): Point | undefined {
   return best
 }
 
-const TILE = 'rounded-3xl p-5 desk:p-6 bg-white'
+// one row per moment: the three compartments are read together, so readings a few seconds
+// apart belong to the same row. newest first
+interface Row {
+  t: number
+  values: Partial<Record<Stream, Point>>
+}
+function toRows(series: Record<Stream, Point[]>): Row[] {
+  const all = STREAMS.flatMap(s => series[s].map(p => ({ s, p }))).sort((a, b) => a.p.t - b.p.t)
+  const rows: Row[] = []
+  for (const { s, p } of all) {
+    const last = rows[rows.length - 1]
+    if (last && p.t - last.t <= 5000 && !last.values[s]) last.values[s] = p
+    else rows.push({ t: p.t, values: { [s]: p } })
+  }
+  return rows.reverse()
+}
+
+function downloadCsv(filename: string, rows: (string | number)[][]) {
+  const cell = (v: string | number) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v))
+  const url = URL.createObjectURL(new Blob([rows.map(r => r.map(cell).join(',')).join('\n')], { type: 'text/csv' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+const TILE = 'rounded-3xl p-5 desk:p-6 glass'
 
 function Message({ title, text }: { title: string; text: string }) {
   return (
@@ -228,16 +255,16 @@ function Overview({ bins }: { bins: HistoryBin[] }) {
         const avg = fills.length ? Math.round(fills.reduce((a, b) => a + b, 0) / fills.length) : null
         const full = fills.filter(f => f >= CRITICAL_AT).length
         return (
-          <div key={s} className="rounded-3xl p-3 sm:p-5 bg-white">
+          <div key={s} className="rounded-3xl p-3 sm:p-5 glass">
             <span className="flex items-center gap-1.5 text-xs sm:text-sm font-medium text-pine">
               <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: STREAM_COLOR[s] }} />
               {s}
             </span>
             <p className="flex items-baseline gap-1 mt-2 sm:mt-3">
-              <span className="text-2xl sm:text-4xl font-semibold text-pine tabular-nums">{avg ?? '–'}</span>
+              <span className="text-2xl sm:text-4xl font-bold text-pine tabular-nums">{avg ?? '–'}</span>
               <span className="text-xs text-pine-muted">% avg</span>
             </p>
-            <div className="h-1.5 rounded-full bg-ivory mt-2 sm:mt-3 overflow-hidden">
+            <div className="h-1.5 rounded-full bg-pine/10 mt-2 sm:mt-3 overflow-hidden">
               <div className="h-full rounded-full" style={{ width: `${avg ?? 0}%`, backgroundColor: STREAM_COLOR[s] }} />
             </div>
             <p className={`text-[11px] sm:text-xs mt-2 ${full ? 'text-status-critical-ink font-semibold' : 'text-pine-muted'}`}>
@@ -259,7 +286,7 @@ function MiniBars({ bin }: { bin: HistoryBin }) {
         const fill = bin.compartments.find(c => c.label === s)?.fill ?? 0
         return (
           <div key={s} className="flex flex-col items-center gap-1" title={`${s} ${Math.round(fill)}%`}>
-            <div className="w-2 h-8 rounded-full bg-ivory overflow-hidden flex items-end">
+            <div className="w-2 h-8 rounded-full bg-pine/10 overflow-hidden flex items-end">
               <div className={`w-full rounded-full ${offline ? 'bg-status-offline' : STATUS_DOT[statusOf(fill)]}`} style={{ height: `${Math.min(100, fill)}%` }} />
             </div>
             <span className="text-[10px] text-pine-muted tabular-nums leading-none">{Math.round(fill)}</span>
@@ -289,7 +316,7 @@ function BinGroups({ bins, onPick }: { bins: HistoryBin[]; onPick: (id: string) 
                 <button
                   key={b.id}
                   onClick={() => onPick(b.id)}
-                  className="flex items-center justify-between gap-3 bg-white rounded-2xl pl-4 pr-3 py-3 text-left hover:bg-white/70 transition-colors"
+                  className="flex items-center justify-between gap-3 glass rounded-2xl pl-4 pr-3 py-3 text-left hover:bg-white/80 transition-colors"
                 >
                   <span className="min-w-0">
                     <span className="block font-semibold text-pine truncate">{b.name}</span>
@@ -428,7 +455,11 @@ function FillChart({ points, color, label, hoverT, onHover }: {
 }
 
 export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; sampleData: boolean }) {
-  const [binId, setBinId] = useState<string | null>(null) // null = the overview
+  // starts on the fullest bin, like the mockup. null = the all-bins overview
+  const [binId, setBinId] = useState<string | null>(() => {
+    const online = bins.filter(b => b.sensorStatus === 'online')
+    return [...(online.length ? online : bins)].sort((a, b) => fullest(b) - fullest(a))[0]?.id ?? null
+  })
   const [stream, setStream] = useState<Stream>('Landfill')
   const [range, setRange] = useState<RangeKey>('10m')
   const [series, setSeries] = useState<Record<Stream, Point[]> | null>(null)
@@ -480,6 +511,7 @@ export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; 
     for (const s of STREAMS) out[s] = series[s].filter(p => newest - p.t <= ms)
     return out
   }, [series, range])
+  const rows = useMemo(() => toRows(windowed), [windowed])
 
   const hasData = STREAMS.some(s => windowed[s].length > 0)
   // if the picked compartment has nothing, show one that does
@@ -490,22 +522,51 @@ export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; 
   if (bins.length === 0) {
     return (
       <>
-        <h1 className="text-3xl lg:text-4xl font-semibold text-pine">History</h1>
+        <h1 className="text-3xl lg:text-4xl font-bold text-pine tracking-tight">History</h1>
         <Message title="No bins to show" text="Once you have a zone with bins, their fill history will show up here." />
       </>
     )
   }
 
-  function openBin(id: string) {
+  function openBin(id: string | null) {
     setBinId(id)
     setHoverT(null)
-    window.scrollTo({ top: 0 })
   }
+
+  // the picker: all bins, the five fullest, then a menu with the rest
+  const byFill = [...bins].sort((a, b) => fullest(b) - fullest(a))
+  const quick = byFill.slice(0, 5)
+  if (bin && !quick.includes(bin)) quick.push(bin)
+  const rest = byFill.filter(b => !quick.includes(b))
+  const chipCls = (on: boolean) => `shrink-0 px-4 min-h-10 rounded-full text-sm font-bold transition-colors ${on ? 'bg-pine text-ivory' : 'glass text-pine hover:bg-white/80'}`
+  const picker = (
+    <div className="flex gap-2 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap pb-1" role="group" aria-label="Pick a bin">
+      <button onClick={() => openBin(null)} aria-pressed={!bin} className={chipCls(!bin)}>All bins</button>
+      {quick.map(b => (
+        <button key={b.id} onClick={() => openBin(b.id)} aria-pressed={b.id === activeId} className={chipCls(b.id === activeId)}>{b.name}</button>
+      ))}
+      {rest.length > 0 && (
+        <label className="relative shrink-0">
+          <span className="sr-only">More bins</span>
+          <select
+            value=""
+            onChange={e => e.target.value && openBin(e.target.value)}
+            className="appearance-none glass rounded-full pl-4 pr-9 min-h-10 text-sm font-bold text-pine cursor-pointer outline-none"
+          >
+            <option value="">More</option>
+            {rest.map(b => <option key={b.id} value={b.id}>{b.name} · {b.location}</option>)}
+          </select>
+          <svg viewBox="0 0 24 24" className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-pine" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+        </label>
+      )}
+    </div>
+  )
 
   if (!bin) {
     return (
       <>
-        <h1 className="text-3xl lg:text-4xl font-semibold text-pine">History</h1>
+        <h1 className="text-3xl lg:text-4xl font-bold text-pine tracking-tight">History</h1>
+        {picker}
         <Overview bins={bins} />
         <BinGroups bins={bins} onPick={openBin} />
       </>
@@ -522,36 +583,59 @@ export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; 
         { label: 'Highest', value: Math.max(...pcts) },
       ]
     : []
-  const recent = [...points].reverse().slice(0, 8)
-  const span = points.length ? points[points.length - 1].t - points[0].t : 0
+  const span = rows.length ? rows[0].t - rows[rows.length - 1].t : 0
+  const offline = bin.sensorStatus === 'offline'
 
   function pickStream(s: Stream) {
     setStream(s)
     setHoverT(null)
   }
 
+  function exportCsv() {
+    const label = RANGES.find(r => r.key === range)!.label.replace(' ', '')
+    downloadCsv(`${bin!.name.replace(/\s+/g, '-').toLowerCase()}-history-${label}.csv`, [
+      ['Time', ...STREAMS.flatMap(s => [`${s} (%)`, `${s} (cm)`])],
+      ...[...rows].reverse().map(r => [
+        new Date(r.t).toLocaleString(),
+        ...STREAMS.flatMap(s => {
+          const p = r.values[s]
+          return p ? [Math.round(p.pct), p.cm.toFixed(1)] : ['', '']
+        }),
+      ]),
+    ])
+  }
+
   return (
     <>
-      {/* back to the overview, then the bin's name */}
-      <div>
-        <button
-          onClick={() => { setBinId(null); setHoverT(null) }}
-          className="inline-flex items-center gap-1 bg-white rounded-full pl-2.5 pr-4 min-h-10 text-sm font-medium text-pine hover:bg-white/70 transition-colors"
-        >
-          <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6" /></svg>
-          All bins
-        </button>
-        <h1 className="text-3xl lg:text-4xl font-semibold text-pine mt-3">{bin.name}</h1>
-        <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-pine-muted mt-1">
-          <span>{bin.location} · {bin.zone}</span>
+      <h1 className="text-3xl lg:text-4xl font-bold text-pine tracking-tight">History</h1>
+      {picker}
+
+      {/* the bin, with how full each compartment is right now */}
+      <div className={`${TILE} flex items-center gap-5`}>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-2xl md:text-[26px] font-bold text-pine leading-tight">{bin.name}</h2>
+          <p className="text-sm text-pine-muted mt-0.5">{bin.location} · {bin.zone}</p>
           {!sampleData && (
-            <>
-              <span aria-hidden="true">·</span>
+            <p className="flex items-center gap-1.5 text-xs text-pine-muted mt-2">
               <span className={`w-1.5 h-1.5 rounded-full ${status === 'error' ? 'bg-status-critical' : 'bg-status-ok'}`} />
-              <span>{status === 'error' ? 'Can’t reach the backend, showing the last readings we had' : `Live, updates every ${REFRESH_MS / 1000} seconds`}</span>
-            </>
+              {status === 'error' ? 'Can’t reach the backend, showing the last readings we had' : `Live, updates every ${REFRESH_MS / 1000} seconds`}
+            </p>
           )}
-        </p>
+        </div>
+        <div className="flex items-end gap-3 sm:gap-4 shrink-0" aria-label="Fill right now">
+          {STREAMS.map(s => {
+            const fill = Math.round(bin.compartments.find(c => c.label === s)?.fill ?? 0)
+            return (
+              <div key={s} className="flex flex-col items-center gap-1.5" title={`${s} ${fill}%`}>
+                <div className="w-7 sm:w-8 h-14 sm:h-16 rounded-[10px] bg-pine/10 overflow-hidden flex items-end">
+                  <div className="w-full" style={{ height: `${Math.min(100, fill)}%`, backgroundColor: offline ? '#9A9A8E' : STREAM_COLOR[s] }} />
+                </div>
+                <span className="text-xs font-bold text-pine tabular-nums">{fill}%</span>
+                <span className="sr-only">{s}</span>
+              </div>
+            )
+          })}
+        </div>
       </div>
 
       {sampleData ? (
@@ -572,112 +656,110 @@ export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; 
         />
       ) : (
         <>
-          {/* one tile per compartment, the picked one is dark */}
-          <div className="grid grid-cols-3 gap-3 desk:gap-4">
-            {STREAMS.map(s => {
-              const pts = windowed[s]
-              const now = pts[pts.length - 1]
-              const picked = s === shown
-              return (
-                <button
-                  key={s}
-                  onClick={() => pickStream(s)}
-                  aria-pressed={picked}
-                  disabled={pts.length === 0}
-                  className={`rounded-3xl p-3 sm:p-4 text-left transition-colors disabled:opacity-50 ${picked ? 'bg-pine text-ivory' : 'bg-white text-pine hover:bg-white/70'}`}
-                >
-                  <span className="flex items-center gap-1.5 text-xs sm:text-sm font-medium">
-                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: picked ? '#F4F1DE' : STREAM_COLOR[s] }} />
+          <div className={TILE}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-base font-bold text-pine">Fill level over time</h2>
+              {/* which compartment the chart shows */}
+              <div className="inline-flex bg-ivory/80 rounded-full p-1" role="group" aria-label="Compartment">
+                {STREAMS.map(s => (
+                  <button
+                    key={s}
+                    onClick={() => pickStream(s)}
+                    aria-pressed={s === shown}
+                    disabled={windowed[s].length === 0}
+                    className={`px-3.5 sm:px-4 min-h-9 rounded-full text-sm font-bold transition-colors disabled:opacity-40 ${s === shown ? 'text-ivory' : 'text-pine-muted hover:text-pine'}`}
+                    style={s === shown ? { backgroundColor: STREAM_COLOR[s] } : undefined}
+                  >
                     {s}
-                  </span>
-                  <div className="my-2 sm:my-3">
-                    <Sparkline points={pts} color={picked ? '#B9C4B4' : STREAM_COLOR[s]} />
-                  </div>
-                  <span className="flex items-baseline gap-1">
-                    <span className="text-2xl sm:text-3xl font-semibold tabular-nums">{now ? Math.round(now.pct) : '–'}</span>
-                    <span className={`text-xs ${picked ? 'text-mist' : 'text-pine-muted'}`}>%</span>
-                  </span>
-                </button>
-              )
-            })}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-start justify-between gap-3 mt-4">
+              <div>
+                <p className="flex items-baseline gap-1.5">
+                  <span className="text-5xl font-bold text-pine tabular-nums">{active ? Math.round(active.pct) : '–'}</span>
+                  <span className="text-sm text-pine-muted">% full</span>
+                </p>
+                <p className="text-xs text-pine-muted mt-1">
+                  {active ? (hoverT === null ? `Latest, ${fmtTime(active.t, 0)}` : fmtTime(active.t, 0)) : ''}
+                </p>
+              </div>
+              {active && (
+                <span className={`inline-flex items-center gap-1.5 rounded-full pl-2.5 pr-3 py-1 text-xs font-bold ${STATUS_PILL[statusOf(active.pct)]}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[statusOf(active.pct)]}`} />
+                  {STATUS_LABEL[statusOf(active.pct)]}
+                </span>
+              )}
+            </div>
+
+            <div className="mt-2 -mx-1">
+              {drawn.length > 0 && (
+                <FillChart points={drawn} color={STREAM_COLOR[shown]} label={shown} hoverT={hoverT} onHover={setHoverT} />
+              )}
+            </div>
+
+            {/* average, lowest, highest for the range */}
+            <div className="grid grid-cols-3 gap-2 sm:gap-3 mt-3">
+              {stats.map(s => (
+                <div key={s.label} className="rounded-2xl bg-ivory/75 px-3 sm:px-4 py-3">
+                  <p className="text-xs font-semibold text-pine-muted">{s.label}</p>
+                  <p className="text-2xl font-bold text-pine tabular-nums mt-0.5">{Math.round(s.value)}<span className="text-xs font-semibold text-pine-muted ml-0.5">%</span></p>
+                </div>
+              ))}
+            </div>
+
+            {/* time range */}
+            <div className="flex justify-center mt-5">
+              <div className="inline-flex flex-wrap justify-center bg-ivory/80 rounded-full p-1" role="group" aria-label="Time range">
+                {RANGES.map(r => (
+                  <button
+                    key={r.key}
+                    onClick={() => { setRange(r.key); setHoverT(null) }}
+                    aria-pressed={range === r.key}
+                    className={`px-4 min-h-10 rounded-full text-sm font-bold transition-colors ${range === r.key ? 'bg-pine text-ivory' : 'text-pine-muted hover:text-pine'}`}
+                  >
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
-          <div className="grid gap-5 desk:gap-6 lg:grid-cols-3">
-            {/* main chart */}
-            <div className={`${TILE} lg:col-span-2`}>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm text-pine-muted">{shown} fill</p>
-                  <p className="flex items-baseline gap-1.5 mt-0.5">
-                    <span className="text-5xl font-semibold text-pine tabular-nums">{active ? Math.round(active.pct) : '–'}</span>
-                    <span className="text-sm text-pine-muted">% full</span>
-                  </p>
-                  <p className="text-xs text-pine-muted mt-1">
-                    {active ? (hoverT === null ? `Latest, ${fmtTime(active.t, 0)}` : fmtTime(active.t, 0)) : ''}
-                  </p>
-                </div>
-                {active && (
-                  <span className={`inline-flex items-center gap-1.5 rounded-full pl-2.5 pr-3 py-1 text-xs font-semibold ${STATUS_PILL[statusOf(active.pct)]}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[statusOf(active.pct)]}`} />
-                    {STATUS_LABEL[statusOf(active.pct)]}
-                  </span>
-                )}
-              </div>
-
-              <div className="mt-2 -mx-1">
-                {drawn.length > 0 && (
-                  <FillChart points={drawn} color={STREAM_COLOR[shown]} label={shown} hoverT={hoverT} onHover={setHoverT} />
-                )}
-              </div>
-
-              {/* average, lowest, highest for the range */}
-              <div className="grid grid-cols-3 divide-x divide-stone-200 border-t border-stone-100 mt-3 pt-4 text-center">
-                {stats.map(s => (
-                  <div key={s.label}>
-                    <p className="text-xs text-pine-muted">{s.label}</p>
-                    <p className="text-2xl font-semibold text-pine tabular-nums mt-0.5">{Math.round(s.value)}<span className="text-xs font-normal text-pine-muted ml-0.5">%</span></p>
-                  </div>
-                ))}
-              </div>
-
-              {/* time range */}
-              <div className="flex justify-center mt-5">
-                <div className="inline-flex flex-wrap justify-center bg-ivory rounded-full p-1" role="group" aria-label="Time range">
-                  {RANGES.map(r => (
-                    <button
-                      key={r.key}
-                      onClick={() => { setRange(r.key); setHoverT(null) }}
-                      aria-pressed={range === r.key}
-                      className={`px-4 min-h-10 rounded-full text-sm font-medium transition-colors ${range === r.key ? 'bg-pine text-ivory' : 'text-pine-muted hover:text-pine'}`}
-                    >
-                      {r.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+          {/* newest readings for all three compartments, also the text version of the chart */}
+          <div className={TILE}>
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <h2 className="text-lg font-bold text-pine">Latest readings</h2>
+              <button
+                onClick={exportCsv}
+                className="inline-flex items-center gap-1.5 bg-ivory/80 hover:bg-ivory rounded-full pl-3 pr-3.5 min-h-10 text-xs font-bold text-pine transition-colors"
+                title="Download every reading in this time range as a spreadsheet (CSV)"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2M7 11l5 5l5 -5M12 4l0 12" /></svg>
+                Export CSV
+              </button>
             </div>
-
-            {/* newest readings, also the text version of the chart */}
-            <div className={TILE}>
-              <div className="flex items-baseline justify-between mb-2">
-                <h2 className="text-lg font-semibold text-pine">Latest readings</h2>
-                <span className="text-xs text-pine-muted">{shown}</span>
-              </div>
-              <ul>
-                {recent.map((p, i) => (
-                  <li key={`${p.t}-${i}`} className="flex items-center justify-between gap-3 py-2.5 border-t border-stone-100 first:border-t-0">
-                    <span className="flex items-center gap-2.5 min-w-0">
-                      <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS_DOT[statusOf(p.pct)]}`} />
-                      <span className="text-sm text-pine tabular-nums">{fmtTime(p.t, span)}</span>
-                    </span>
-                    <span className="text-right">
-                      <span className="text-sm font-semibold text-pine tabular-nums">{Math.round(p.pct)}%</span>
-                      <span className="block text-[11px] text-pine-muted tabular-nums">{p.cm.toFixed(1)} cm</span>
-                    </span>
-                  </li>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-[0.08em] text-pine-muted">
+                  <th className="font-bold py-2 pr-2">Time</th>
+                  {STREAMS.map(s => <th key={s} className="font-bold py-2 px-2 text-right sm:text-left">{s}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.slice(0, 8).map(r => (
+                  <tr key={r.t} className="border-t border-pine/[0.07]">
+                    <td className="py-2.5 pr-2 font-semibold text-pine tabular-nums whitespace-nowrap">{fmtTime(r.t, span)}</td>
+                    {STREAMS.map(s => {
+                      const p = r.values[s]
+                      const ink = !p ? 'text-pine-muted' : { ok: 'text-status-ok-ink', warn: 'text-status-warn-ink', critical: 'text-status-critical-ink' }[statusOf(p.pct)]
+                      return <td key={s} className={`py-2.5 px-2 font-bold tabular-nums text-right sm:text-left ${ink}`}>{p ? `${Math.round(p.pct)}%` : '–'}</td>
+                    })}
+                  </tr>
                 ))}
-              </ul>
-            </div>
+              </tbody>
+            </table>
           </div>
         </>
       )}

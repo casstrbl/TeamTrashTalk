@@ -6,7 +6,10 @@ import { MapContainer, TileLayer, ImageOverlay, Pane, Marker, Popup, useMap, use
 import 'leaflet/dist/leaflet.css'
 import Lenis from 'lenis'
 import 'lenis/dist/lenis.css'
-import logoUrl from './imports/logo.png'
+import BinLogo from './BinLogo'
+import LoginPage from './LoginPage'
+import PickupPage from './PickupPage'
+import type { PickupBin, PickupRecord } from './PickupPage'
 import { mockBins } from './data/mockBins'
 import { campusBoundary } from './data/campusBoundary'
 import { campusBuildings } from './data/campusBuildings'
@@ -98,6 +101,56 @@ const SAMPLE_CLEAR_BINS: Tribin[] = TRIBINS.map(b => ({
 const ALL_ZONES: Zone[] = [
     ...new Set(TRIBINS.map(bin => bin.zone))
 ]
+
+// what sets off an alert. editors change these on the admin page
+interface AlertSettings {
+  fillOn: boolean
+  fillAt: number // percent, any compartment
+  offlineOn: boolean
+  batteryOn: boolean
+  batteryAt: number // percent
+  dailyEmail: boolean // saved, but no emails are sent while testing (the client asked for that)
+}
+const DEFAULT_ALERT_SETTINGS: AlertSettings = { fillOn: true, fillAt: 80, offlineOn: true, batteryOn: true, batteryAt: 20, dailyEmail: false }
+
+// browser storage for the demo: who's signed in, the staff list (so new accounts and role or zone
+// changes survive a reload), alert settings and pickup records. it's per browser, and can be
+// missing or blocked (private mode), so every read and write is guarded. the backend should own
+// all of this later
+const STORE = { session: 'tt-session', staff: 'tt-staff-v1', alerts: 'tt-alert-settings-v1', pickups: 'tt-pickups-v1' }
+
+function loadStored<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw ? { ...fallback, ...JSON.parse(raw) } : fallback
+  } catch {
+    return fallback
+  }
+}
+function loadStoredList<T>(key: string, fallback: T[]): T[] {
+  try {
+    const raw = localStorage.getItem(key)
+    const v = raw ? JSON.parse(raw) : null
+    return Array.isArray(v) ? v : fallback
+  } catch {
+    return fallback
+  }
+}
+function saveStored(key: string, value: unknown) {
+  try {
+    if (value === null) localStorage.removeItem(key)
+    else localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // storage blocked: the change still works until the page reloads
+  }
+}
+function loadSession(): string | null {
+  try {
+    return localStorage.getItem(STORE.session)
+  } catch {
+    return null
+  }
+}
 // helpers
 
 function maxFill(bin: Tribin) {
@@ -314,7 +367,7 @@ function RingGauge({ fill, size = 56 }: { fill: number; size?: number }) {
   const offset = circ - (fill / 100) * circ
   return (
     <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#E6E1C5" strokeWidth={6} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgb(15 46 35 / 0.08)" strokeWidth={6} />
       <circle
         cx={size / 2} cy={size / 2} r={r} fill="none"
         stroke={fillHex(fill)} strokeWidth={6}
@@ -344,13 +397,13 @@ function CompartmentBar({ label, fill }: { label: Stream; fill: number }) {
   return (
     <div className="space-y-0.5">
       <div className="flex justify-between items-center">
-        <span className="flex items-center gap-1.5 text-[10px] font-medium text-stone-500 uppercase tracking-wide">
+        <span className="flex items-center gap-1.5 text-[10px] font-bold text-pine-muted uppercase tracking-wide">
           <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: compartmentColor(label) }} />
           {label}
         </span>
-        <span className="font-mono text-[10px] font-medium text-stone-500">{fill}%</span>
+        <span className="font-mono text-[11px] font-bold text-pine-muted">{fill}%</span>
       </div>
-      <div className="h-1.5 rounded-full bg-stone-200 overflow-hidden">
+      <div className="h-1.5 rounded-full bg-pine/10 overflow-hidden">
         <div className={`h-full rounded-full ${fillBarColor(fill)} transition-all duration-500`} style={{ width: `${fill}%` }} />
       </div>
     </div>
@@ -379,27 +432,24 @@ function BinCard({ bin, onClick, onShowOnMap, highlighted = false }: {
       tabIndex={0}
       onClick={onClick}
       onKeyDown={onActivate(onClick)}
-      className={`group text-left bg-white rounded-2xl border p-4 hover:border-teal/40 hover:shadow-lg hover:shadow-pine/5 transition-all duration-200 cursor-pointer ${highlighted ? 'border-mint ring-2 ring-mint/30' : 'border-stone-200/80'}`}
+      className={`group text-left ${onShowOnMap ? 'glass' : 'glass-blur bg-white/90!'} rounded-3xl p-4 sm:p-[18px] hover:bg-white/75 hover:shadow-lg hover:shadow-pine/10 transition-all duration-200 cursor-pointer ${highlighted ? 'border-teal! ring-2 ring-teal/30' : ''}`}
     >
       <div className="flex items-start justify-between mb-3">
         <div>
-          <p className="font-bold text-forest text-sm">{bin.name}</p>
-          <p className="text-xs text-stone-400 mt-0.5">{bin.location}</p>
+          <p className="font-bold text-forest text-base">{bin.name}</p>
+          <p className="text-xs font-medium text-pine-muted mt-0.5">{bin.location}</p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${statusBg(binStatus(bin))}`}>
+          <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${statusBg(binStatus(bin))}`}>
             {statusLabel(binStatus(bin))}
           </span>
-          {bin.sensorStatus === 'offline' && (
-            <span className="text-[9px] text-stone-400 font-mono">OFFLINE</span>
-          )}
         </div>
       </div>
 
       <div className="flex items-center gap-3 mb-3">
         <div className="relative flex items-center justify-center">
-          <RingGauge fill={top} size={52} />
-          <span className="absolute font-mono text-[11px] font-bold" style={{ color: fillHex(top) }}>
+          <RingGauge fill={top} size={58} />
+          <span className="absolute font-mono text-[13px] font-bold" style={{ color: fillHex(top) }}>
             {top}%
           </span>
         </div>
@@ -410,21 +460,21 @@ function BinCard({ bin, onClick, onShowOnMap, highlighted = false }: {
         </div>
       </div>
 
-      <div className="flex items-center justify-between pt-2 border-t border-stone-100">
+      <div className="flex items-center justify-between pt-2.5 border-t border-pine/[0.08]">
         <BatteryIcon level={bin.battery} />
         <div className="flex items-center gap-2">
           {/* before: pads the tap area without changing the look */}
           {onShowOnMap && (
             <button
               onClick={e => { e.stopPropagation(); onShowOnMap() }}
-              className="relative inline-flex items-center gap-1 text-[10px] leading-none font-semibold text-mint-dark bg-mint/10 hover:bg-mint/20 rounded-full px-2 py-0.5 transition-colors before:absolute before:-inset-x-2 before:-inset-y-3"
+              className="relative inline-flex items-center gap-1 text-[11px] leading-none font-bold text-teal bg-teal-soft hover:bg-teal/20 rounded-full px-2.5 py-1 transition-colors before:absolute before:-inset-x-2 before:-inset-y-3"
               aria-label={`Show ${bin.name} on map`}
             >
-              <MapPinIcon size={9} />
+              <MapPinIcon size={11} />
               Map
             </button>
           )}
-          <span className="text-[10px] text-stone-400 font-mono">{bin.lastUpdated}</span>
+          <span className="text-[11px] font-medium text-pine-muted">{bin.lastUpdated}</span>
         </div>
       </div>
     </div>
@@ -434,25 +484,25 @@ function BinCard({ bin, onClick, onShowOnMap, highlighted = false }: {
 function AlertItem({ alert, onDismiss, onSelect }: { alert: Alert; onDismiss: (id: string) => void; onSelect: (alert: Alert) => void }) {
   // rose card = needs attention; the stripe and dot carry the severity
   const dot = { critical: 'bg-status-critical', warn: 'bg-status-warn', info: 'bg-teal' }[alert.severity]
-  const bg = { critical: 'border-l-status-critical bg-rose/15', warn: 'border-l-status-warn bg-rose/15', info: 'border-l-teal bg-teal/10' }[alert.severity]
+  const bg = { critical: 'tint-rose', warn: 'tint-rose', info: 'tint-teal' }[alert.severity]
   return (
     <div
       role="button"
       tabIndex={0}
       onClick={() => onSelect(alert)}
       onKeyDown={onActivate(() => onSelect(alert))}
-      className={`flex gap-3 p-3 border-l-2 rounded-r-lg cursor-pointer hover:shadow-md hover:shadow-forest/5 transition-shadow ${bg}`}
+      className={`flex gap-3 glass rounded-2xl px-4 py-3.5 cursor-pointer hover:shadow-md hover:shadow-forest/10 transition-shadow ${bg}`}
       title="Show on map"
     >
       <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${dot}`} />
       <div className="flex-1 min-w-0">
-        <p className="text-xs font-semibold text-forest">{alert.binName} · {alert.zone}</p>
-        <p className="text-xs text-stone-600 mt-0.5 leading-snug">{alert.message}</p>
-        <p className="text-[10px] text-stone-400 font-mono mt-1">{alert.time}</p>
+        <p className="text-sm font-bold text-forest">{alert.binName} · {alert.zone}</p>
+        <p className="text-[13px] font-medium text-pine-muted mt-0.5 leading-snug">{alert.message}</p>
+        <p className="text-[11px] text-pine-muted mt-1">{alert.time}</p>
       </div>
       <button
         onClick={e => { e.stopPropagation(); onDismiss(alert.id) }}
-        className="text-stone-300 hover:text-stone-500 shrink-0 text-xs transition-colors"
+        className="relative text-pine-muted/60 hover:text-pine shrink-0 text-sm transition-colors self-start before:absolute before:-inset-3"
         title="Dismiss"
         aria-label="Dismiss alert"
       >✕</button>
@@ -471,15 +521,15 @@ function BinDetailModal({ bin, onClose }: { bin: Tribin; onClose: () => void }) 
   }, [onClose])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-forest/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-forest/30 backdrop-blur-md" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label={bin.name} className="glass-blur bg-white/85! rounded-[28px] shadow-2xl max-w-sm w-full p-6" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-start mb-4">
           <div>
             <h2 className="font-display text-xl font-bold text-forest">{bin.name}</h2>
-            <p className="text-sm text-stone-400">{bin.zone}</p>
-            <p className="text-[11px] text-stone-400 font-mono mt-0.5">{bin.id}</p>
+            <p className="text-sm font-medium text-pine-muted">{bin.location} · {bin.zone}</p>
+            <p className="text-[11px] text-pine-muted mt-0.5">{bin.id}</p>
           </div>
-          <button onClick={onClose} aria-label="Close" className="text-stone-300 hover:text-stone-600 transition-colors text-lg">✕</button>
+          <button onClick={onClose} aria-label="Close" className="w-11 h-11 -mt-2 -mr-2 rounded-full flex items-center justify-center text-pine-muted hover:text-pine hover:bg-pine/5 transition-colors text-lg">✕</button>
         </div>
 
         <div className="flex justify-center mb-5">
@@ -487,7 +537,7 @@ function BinDetailModal({ bin, onClose }: { bin: Tribin; onClose: () => void }) 
             <RingGauge fill={maxFill(bin)} size={96} />
             <div className="absolute inset-0 flex flex-col items-center justify-center">
               <span className="font-mono font-bold text-lg" style={{ color: fillHex(maxFill(bin)) }}>{maxFill(bin)}%</span>
-              <span className="text-[9px] text-stone-400 uppercase tracking-wider">max fill</span>
+              <span className="text-[10px] font-bold text-pine-muted uppercase tracking-wider">fullest</span>
             </div>
           </div>
         </div>
@@ -496,35 +546,35 @@ function BinDetailModal({ bin, onClose }: { bin: Tribin; onClose: () => void }) 
           {bin.compartments.map(c => (
             <div key={c.label}>
               <div className="flex justify-between mb-1">
-                <span className="flex items-center gap-1.5 text-xs font-semibold text-stone-600">
+                <span className="flex items-center gap-1.5 text-xs font-bold text-pine">
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: compartmentColor(c.label) }} />
                   {c.label}
                 </span>
-                <span className="font-mono text-xs font-bold text-stone-500">{c.fill}%</span>
+                <span className="font-mono text-xs font-bold text-pine-muted">{c.fill}%</span>
               </div>
-              <div className="h-2.5 rounded-full bg-stone-100 overflow-hidden">
+              <div className="h-2.5 rounded-full bg-pine/10 overflow-hidden">
                 <div className={`h-full rounded-full ${fillBarColor(c.fill)} transition-all duration-500`} style={{ width: `${c.fill}%` }} />
               </div>
             </div>
           ))}
         </div>
 
-        <div className="grid grid-cols-2 gap-3 text-xs border-t border-stone-100 pt-4">
+        <div className="grid grid-cols-2 gap-3 text-xs border-t border-pine/[0.08] pt-4">
           <div>
-            <p className="text-stone-400 uppercase tracking-wider text-[10px]">Sensor</p>
+            <p className="text-pine-muted font-bold uppercase tracking-wider text-[10px]">Sensor</p>
             <p className={`font-medium mt-0.5 capitalize ${bin.sensorStatus === 'online' ? 'text-status-ok-ink' : 'text-status-critical-ink'}`}>{bin.sensorStatus}</p>
           </div>
           <div>
-            <p className="text-stone-400 uppercase tracking-wider text-[10px]">Battery</p>
+            <p className="text-pine-muted font-bold uppercase tracking-wider text-[10px]">Battery</p>
             <BatteryIcon level={bin.battery} />
           </div>
           <div>
-            <p className="text-stone-400 uppercase tracking-wider text-[10px]">Status</p>
+            <p className="text-pine-muted font-bold uppercase tracking-wider text-[10px]">Status</p>
             <span className={`inline-block mt-0.5 px-2 py-0.5 rounded-full text-[10px] font-semibold ${statusBg(binStatus(bin))}`}>{statusLabel(binStatus(bin))}</span>
           </div>
           <div>
-            <p className="text-stone-400 uppercase tracking-wider text-[10px]">Last Update</p>
-            <p className="font-mono text-stone-600 mt-0.5">{bin.lastUpdated}</p>
+            <p className="text-pine-muted font-bold uppercase tracking-wider text-[10px]">Last Update</p>
+            <p className="font-semibold text-pine mt-0.5">{bin.lastUpdated}</p>
           </div>
         </div>
       </div>
@@ -544,7 +594,9 @@ interface MapFocus {
 // `.leaflet-popup-content p` margins (the card's second p has mt-0.5)
 const BIN_POPUP_CLASS = [
   '[&_.leaflet-popup-content-wrapper]:p-0!',
-  '[&_.leaflet-popup-content-wrapper]:rounded-2xl!',
+  '[&_.leaflet-popup-content-wrapper]:rounded-3xl!',
+  '[&_.leaflet-popup-content-wrapper]:bg-transparent!',
+  '[&_.leaflet-popup-content-wrapper]:shadow-xl!',
   '[&_.leaflet-popup-content]:m-0!',
   '[&_.leaflet-popup-content_p]:my-0!',
   '[&_.leaflet-popup-content_p+p]:mt-0.5!',
@@ -656,7 +708,7 @@ function BinMapLayers({ bins, fitKey, selectedId, focus, onSelect, onClosePopup,
             <BinCard bin={popupBin} onClick={() => onOpenDetail(popupBin)} />
             <button
               onClick={onClosePopup}
-              className="absolute -top-2 -right-2 w-6 h-6 flex items-center justify-center rounded-full bg-white border border-stone-200 shadow text-stone-400 hover:text-stone-600 text-xs transition-colors before:absolute before:-inset-2"
+              className="absolute -top-2 -right-2 w-6 h-6 flex items-center justify-center rounded-full bg-white border border-pine/10 shadow text-pine-muted hover:text-pine text-xs transition-colors before:absolute before:-inset-2"
               aria-label="Close bin card"
             >✕</button>
           </div>
@@ -796,7 +848,7 @@ function MapLegend({ hidden }: { hidden: boolean }) {
   ]
   return (
     // top right: bottom corners hold the osm attribution, top left the zoom buttons
-    <div className={`absolute right-2 top-2 z-[1000] max-w-[calc(100%-4rem)] pointer-events-none bg-white/95 rounded-xl border border-stone-200 px-2.5 py-1.5 flex flex-wrap justify-end items-center gap-x-3 gap-y-1 text-[10px] font-medium text-stone-500 transition-opacity ${hidden ? 'opacity-0' : ''}`}>
+    <div className={`absolute right-2 top-2 z-[1000] max-w-[calc(100%-4rem)] pointer-events-none glass-blur rounded-2xl px-3 py-2 flex flex-wrap justify-end items-center gap-x-3 gap-y-1 text-[11px] font-bold text-pine transition-opacity ${hidden ? 'opacity-0' : ''}`}>
       {items.map(i => (
         <span key={i.label} className="flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: i.hex }} />
@@ -804,7 +856,7 @@ function MapLegend({ hidden }: { hidden: boolean }) {
         </span>
       ))}
       <span className="flex items-center gap-1.5">
-        <span className="w-3.5 h-3.5 rounded-full border-2 border-stone-400 font-mono text-[8px] font-bold text-forest flex items-center justify-center">2</span>
+        <span className="w-3.5 h-3.5 rounded-full border-2 border-pine-muted font-mono text-[8px] font-bold text-forest flex items-center justify-center">2</span>
         Grouped
       </span>
     </div>
@@ -823,7 +875,7 @@ function BinMap(props: BinMapProps) {
 
   return (
     // isolate keeps leaflet's z-indexes (up to 1000) below the sticky nav and the detail popup
-    <div data-map data-lenis-prevent className="relative isolate h-[60vh] min-h-[320px] max-h-[640px] bg-white rounded-2xl border border-stone-200/80 overflow-hidden scroll-mt-4">
+    <div data-map data-lenis-prevent className="relative isolate h-[60vh] min-h-[320px] max-h-[760px] bg-white rounded-3xl border-[6px] border-white/80 shadow-[0_8px_24px_rgb(15_46_35/0.08)] overflow-hidden scroll-mt-4">
       <MapContainer {...initial} maxZoom={MAX_ZOOM} maxBounds={MAP_LIMIT} maxBoundsViscosity={1} className="h-full w-full">
         <BaseMap />
         <CampusFog />
@@ -887,12 +939,12 @@ function NavRail({ page, role, onNavigate }: { page: Page; role: Role; onNavigat
   )
   return (
     <>
-      <nav aria-label="Main" className="hidden desk:flex fixed inset-y-0 left-0 z-40 w-[76px] bg-pine flex-col items-center gap-3 py-5">
-        <img src={logoUrl} alt="Sac State Sustainability" className="w-14 h-auto mb-4" />
+      <nav aria-label="Main" className="hidden desk:flex fixed inset-y-3 left-3 z-40 w-[76px] glass-dark rounded-[32px] flex-col items-center gap-3 py-5">
+        <BinLogo size={44} className="mb-4" />
         {items.map(button)}
       </nav>
       <nav aria-label="Main" className="desk:hidden fixed bottom-0 inset-x-0 z-40 px-4 pb-[max(12px,env(safe-area-inset-bottom))] pointer-events-none">
-        <div className="pointer-events-auto mx-auto max-w-md bg-pine rounded-full p-1.5 flex justify-between shadow-lg shadow-pine/30">
+        <div className="pointer-events-auto mx-auto max-w-[420px] glass-dark rounded-full p-2 flex justify-between">
           {items.map(button)}
         </div>
       </nav>
@@ -900,48 +952,75 @@ function NavRail({ page, role, onNavigate }: { page: Page; role: Role; onNavigat
   )
 }
 
-// avatar + greeting (tap to switch the demo user), synced pill, alert bell
-function TopBar({ userName, role, greeting, syncedLabel, alertCount, sampleData, onSwitchUser, onBell }: {
+// avatar + greeting (tap for the account menu), synced pill, alert bell
+function TopBar({ userName, role, greeting, syncedLabel, alertCount, sampleData, nextDemoUser, onSwitchUser, onLogout, onBell }: {
   userName: string
   role: Role
   greeting: string
   syncedLabel: string
   alertCount: number
   sampleData: boolean
+  nextDemoUser: string // who "switch demo user" goes to
   onSwitchUser: () => void
+  onLogout: () => void
   onBell: () => void
 }) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  // a tap anywhere else, or esc, closes the menu
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDown = (e: PointerEvent) => { if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false) }
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false) }
+    window.addEventListener('pointerdown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => { window.removeEventListener('pointerdown', onDown); window.removeEventListener('keydown', onKey) }
+  }, [menuOpen])
+
+  const menuItem = 'w-full text-left min-h-11 px-4 rounded-xl text-sm font-bold text-pine hover:bg-pine/5 transition-colors'
   return (
     <div className="flex items-center gap-3">
-      <button
-        onClick={onSwitchUser}
-        title="Switch demo user"
-        aria-label={`${userName}, ${role}. Switch demo user`}
-        className="flex items-center gap-3 min-h-11 text-left rounded-full -ml-1 pl-1 pr-3 hover:bg-white/60 transition-colors"
-      >
-        <span className="w-11 h-11 rounded-full bg-pine text-ivory flex items-center justify-center text-sm font-semibold">
-          {userName.split(' ').map(n => n[0]).join('')}
-        </span>
-        <span className="leading-tight">
-          <span className="block text-xs text-pine-muted">{greeting},</span>
-          <span className="block text-sm font-semibold text-pine">
-            {userName} <span className="font-medium text-pine-muted capitalize">· {role}</span>
+      <div ref={menuRef} className="relative">
+        <button
+          onClick={() => setMenuOpen(o => !o)}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-label={`${userName}, ${role}. Account menu`}
+          className="flex items-center gap-3 min-h-11 text-left rounded-full -ml-1 pl-1 pr-3 hover:bg-white/50 transition-colors"
+        >
+          <span className="w-11 h-11 rounded-full bg-pine text-ivory flex items-center justify-center text-sm font-bold shrink-0">
+            {userName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
           </span>
-        </span>
-      </button>
+          <span className="leading-tight min-w-0">
+            <span className="block text-xs font-medium text-pine-muted">{greeting},</span>
+            <span className="block text-[15px] font-bold text-pine truncate">
+              {userName} <span className="font-medium text-pine-muted capitalize">· {role}</span>
+            </span>
+          </span>
+        </button>
+        {menuOpen && (
+          <div role="menu" className="absolute left-0 top-full mt-2 z-50 w-60 glass-blur bg-white/90! rounded-2xl p-1.5 shadow-xl">
+            <button role="menuitem" className={menuItem} onClick={() => { setMenuOpen(false); onSwitchUser() }}>
+              Switch demo user
+              <span className="block text-xs font-medium text-pine-muted -mt-0.5 pb-1">to {nextDemoUser}</span>
+            </button>
+            <button role="menuitem" className={`${menuItem} text-status-critical-ink`} onClick={() => { setMenuOpen(false); onLogout() }}>Log out</button>
+          </div>
+        )}
+      </div>
       <div className="ml-auto flex items-center gap-2">
         {sampleData && (
-          <span title="Person 3 shows the bins as if just emptied, to preview the all-clear look" className="inline-flex items-center bg-teal text-ivory text-xs font-semibold px-3.5 py-2 rounded-full">Sample data</span>
+          <span title="Person 3 shows the bins as if just emptied, to preview the all-clear look" className="inline-flex items-center bg-teal text-ivory text-xs font-bold px-3.5 py-2 rounded-full">Sample data</span>
         )}
-        <span className="hidden sm:inline-flex items-center bg-white text-teal text-xs font-semibold px-3.5 py-2 rounded-full">{syncedLabel}</span>
+        <span className="hidden sm:inline-flex items-center glass-blur text-teal text-xs font-bold px-4 py-2.5 rounded-full">{syncedLabel}</span>
         <button
           onClick={onBell}
           aria-label={`Alerts, ${alertCount} active`}
-          className="relative w-11 h-11 rounded-full bg-white text-pine flex items-center justify-center hover:bg-white/70 transition-colors"
+          className="relative w-11 h-11 rounded-full glass-blur text-pine flex items-center justify-center hover:bg-white/80 transition-colors"
         >
           <Icon name="bell" size={20} />
           {alertCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 min-w-5 h-5 px-1 rounded-full bg-rose text-pine text-[10px] font-bold flex items-center justify-center">{alertCount}</span>
+            <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-rose text-pine text-[11px] font-bold flex items-center justify-center">{alertCount}</span>
           )}
         </button>
       </div>
@@ -958,14 +1037,14 @@ function HeroRing({ fill, size = 88 }: { fill: number; size?: number }) {
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
       <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }} aria-hidden="true">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#2A4A3E" strokeWidth={stroke} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgb(244 241 222 / 0.14)" strokeWidth={stroke} />
         <circle
           cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
           strokeDasharray={circ} strokeDashoffset={circ * (1 - fill / 100)}
           style={{ transition: 'stroke-dashoffset 0.6s ease' }}
         />
       </svg>
-      <span className="absolute inset-0 flex items-center justify-center font-mono text-xl font-bold text-ivory">{fill}%</span>
+      <span className="absolute inset-0 flex items-center justify-center font-mono text-[22px] font-bold text-ivory">{fill}%</span>
     </div>
   )
 }
@@ -975,9 +1054,9 @@ function HalfGauge({ pct }: { pct: number }) {
   const arc = 'M10 52 A40 40 0 0 1 90 52'
   return (
     <svg viewBox="0 0 100 58" className="w-full max-w-[220px] mx-auto" role="img" aria-label={`Campus average fill ${pct}%`}>
-      <path d={arc} fill="none" stroke="#fff" strokeWidth="9" strokeLinecap="round" />
+      <path d={arc} fill="none" stroke="rgb(27 91 101 / 0.15)" strokeWidth="9" strokeLinecap="round" />
       <path d={arc} fill="none" stroke="#1B5B65" strokeWidth="9" strokeLinecap="round" strokeDasharray={len} strokeDashoffset={len * (1 - pct / 100)} />
-      <text x="50" y="50" textAnchor="middle" fontSize="16" fontWeight="600" fill="#0F2E23" fontFamily="'DM Mono', monospace">{pct}%</text>
+      <text x="50" y="50" textAnchor="middle" fontSize="16" fontWeight="600" fill="#1B5B65" fontFamily="Quicksand, sans-serif">{pct}%</text>
     </svg>
   )
 }
@@ -1009,9 +1088,9 @@ function CampusSketch({ bins }: { bins: Tribin[] }) {
   })
   return (
     <svg viewBox={`0 0 100 ${SKETCH.height.toFixed(1)}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-      <path d={SKETCH.outline} fill="#fff" stroke="#DCE8E9" strokeWidth="1.2" strokeLinejoin="round" />
+      <path d={SKETCH.outline} fill="rgb(121 143 83 / 0.12)" stroke="rgb(27 91 101 / 0.35)" strokeWidth="0.8" strokeLinejoin="round" />
       {zones.map(z => (
-        <text key={z.zone} x={z.x} y={z.y - 5} textAnchor="middle" fontSize="4.5" fill="#5B6B60" fontFamily="Outfit, sans-serif">{z.zone}</text>
+        <text key={z.zone} x={z.x} y={z.y - 5} textAnchor="middle" fontSize="4.5" fill="#1B5B65" fontWeight="700" fontFamily="Quicksand, sans-serif">{z.zone}</text>
       ))}
       {bins.map(b => {
         const [x, y] = SKETCH.project(b.lng, b.lat)
@@ -1021,7 +1100,7 @@ function CampusSketch({ bins }: { bins: Tribin[] }) {
   )
 }
 
-const TILE = 'rounded-3xl p-5 desk:p-6'
+const TILE = 'rounded-[28px] p-5 md:p-[22px] desk:p-6'
 
 // when the current page was opened (performance.now()), set by PageScope
 const PageOpenedAt = createContext(0)
@@ -1110,8 +1189,8 @@ function SummaryPage({
   return (
     <>
       <div>
-        <h1 className="text-3xl lg:text-4xl font-semibold text-pine leading-tight">At a glance</h1>
-        <span className="sm:hidden mt-3 inline-flex items-center bg-white text-teal text-xs font-semibold px-3.5 py-2 rounded-full">{syncedLabel}</span>
+        <h1 className="text-3xl lg:text-4xl font-bold text-pine leading-tight tracking-tight">At a glance</h1>
+        <span className="sm:hidden mt-3 inline-flex items-center glass text-teal text-xs font-bold px-3.5 py-2 rounded-full">{syncedLabel}</span>
       </div>
 
       {/* bento: 2 columns on phones and portrait tablets, 4 on desk (wide landscape). the pickup tile lists
@@ -1129,16 +1208,16 @@ function SummaryPage({
             onClick={() => onOpenDetail(hero)}
             onKeyDown={onActivate(() => onOpenDetail(hero))}
             aria-label={`${hero.name}, fullest bin at ${maxFill(hero)}%. Open details`}
-            className={`[grid-area:hero] ${TILE} bg-pine text-ivory flex items-center gap-5 cursor-pointer`}
+            className={`[grid-area:hero] ${TILE} glass-dark text-ivory flex items-center gap-5 cursor-pointer`}
           >
-            <HeroRing fill={maxFill(hero)} />
+            <HeroRing fill={maxFill(hero)} size={96} />
             <div className="flex-1 min-w-0">
-              <p className="text-xs text-mist">Fullest bin</p>
-              <p className="text-2xl font-semibold leading-tight">{hero.name}</p>
-              <p className="text-sm text-mist truncate">{hero.location}, {hero.zone}</p>
+              <p className="text-xs font-bold text-mist">Fullest bin</p>
+              <p className="text-[28px] font-bold leading-tight">{hero.name}</p>
+              <p className="text-sm font-medium text-mist truncate">{hero.location}, {hero.zone}</p>
               <button
                 onClick={e => { e.stopPropagation(); onShowOnMap(hero.id) }}
-                className="mt-3 inline-flex items-center gap-1.5 bg-ivory text-pine text-sm font-semibold px-4 min-h-11 rounded-full hover:bg-white transition-colors"
+                className="mt-3 inline-flex items-center gap-1.5 bg-ivory text-pine text-sm font-bold px-4 min-h-11 rounded-full hover:bg-white transition-colors"
               >
                 <Icon name="mapPin" size={16} />
                 Show on map
@@ -1146,16 +1225,16 @@ function SummaryPage({
             </div>
           </div>
         ) : (
-          <div className={`[grid-area:hero] ${TILE} bg-pine text-ivory`}>
-            <p className="text-xs text-mist">Fullest bin</p>
-            <p className="text-lg font-semibold mt-1">No bins are online right now</p>
+          <div className={`[grid-area:hero] ${TILE} glass-dark text-ivory`}>
+            <p className="text-xs font-bold text-mist">Fullest bin</p>
+            <p className="text-lg font-bold mt-1">No bins are online right now</p>
           </div>
         )}
 
         {/* status counts as four equal mini-tiles (2x2, or 4 across when the tile is full width on
             ipad portrait); on desktop they stretch to the tile's height. each opens details for it */}
-        <div className={`[grid-area:status] ${TILE} bg-white flex flex-col`}>
-          <p className="text-xs font-semibold text-pine mb-3">Status</p>
+        <div className={`[grid-area:status] ${TILE} glass flex flex-col`}>
+          <p className="text-xs font-bold text-pine mb-3">Status</p>
           <div className="flex-1 grid grid-cols-2 md:grid-cols-4 desk:grid-cols-2 auto-rows-fr gap-2">
             {STATUS_PILLS.map(s => (
               <button
@@ -1164,41 +1243,41 @@ function SummaryPage({
                 aria-label={`${statusCounts[s.status]} ${statusLabel(s.status)}. Show these bins`}
                 className={`flex flex-col justify-center gap-1 min-h-11 px-3.5 desk:px-3 py-2.5 rounded-2xl text-left ${s.cls} hover:brightness-95 transition`}
               >
-                <span className="text-xs font-semibold">{statusLabel(s.status)}</span>
+                <span className="text-xs font-bold">{statusLabel(s.status)}</span>
                 <span className="font-mono text-2xl font-bold leading-none">{statusCounts[s.status]}</span>
               </button>
             ))}
           </div>
         </div>
 
-        <div className={`[grid-area:gauge] ${TILE} bg-teal-soft flex flex-col`}>
-          <p className="text-xs font-semibold text-teal mb-2">Campus average</p>
+        <div className={`[grid-area:gauge] ${TILE} glass tint-teal flex flex-col`}>
+          <p className="text-xs font-bold text-teal mb-2">Campus average</p>
           <div className="flex-1 flex items-center"><HalfGauge pct={campusAvg} /></div>
-          <p className="text-[11px] text-teal text-center mt-1">average fill, {onlineCount} online bins</p>
+          <p className="text-xs font-semibold text-teal text-center mt-1">average fill, {onlineCount} online bins</p>
         </div>
 
         {/* the campus is taller than wide, so the full-width ipad-portrait tile gets extra height */}
-        <div className={`[grid-area:map] ${TILE} bg-white flex flex-col gap-3 min-h-[220px] md:min-h-[380px] desk:min-h-[220px]`}>
+        <div className={`[grid-area:map] ${TILE} glass flex flex-col gap-3 min-h-[220px] md:min-h-[380px] desk:min-h-[220px]`}>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs font-semibold text-teal">Campus map</p>
-            <button onClick={onOpenMap} className="inline-flex items-center gap-1.5 bg-pine text-ivory text-sm font-semibold px-4 min-h-11 rounded-full hover:bg-forest-light transition-colors">
+            <p className="text-xs font-bold text-teal">Campus map</p>
+            <button onClick={onOpenMap} className="inline-flex items-center gap-1.5 bg-pine text-ivory text-sm font-bold px-4 min-h-11 rounded-full hover:bg-forest-light transition-colors">
               <Icon name="mapPin" size={16} />
               Open map
             </button>
           </div>
           {/* the sketch fills whatever height the grid gives this tile rather than setting it,
               so its tall campus shape can't stretch the rows */}
-          <button onClick={onOpenMap} aria-label="Open map" className="relative flex-1 min-h-[140px] rounded-2xl bg-ivory overflow-hidden">
+          <button onClick={onOpenMap} aria-label="Open map" className="relative flex-1 min-h-[140px] rounded-[20px] bg-ivory/70 overflow-hidden">
             <span className="absolute inset-2"><CampusSketch bins={bins} /></span>
           </button>
         </div>
 
         {/* one tile for pickups: the total up top, then a row per zone. rose while anything
             needs pickup, olive when nothing does. fills the whole area for any number of zones */}
-        <div className={`[grid-area:pickup] ${TILE} flex flex-col ${needPickup === 0 ? 'bg-olive-soft' : 'bg-rose/20'}`}>
+        <div className={`[grid-area:pickup] ${TILE} glass flex flex-col ${needPickup === 0 ? 'tint-olive' : 'tint-rose'}`}>
           <button
             onClick={onPickup}
-            aria-label={needPickup === 0 ? 'All clear, no bins need pickup. Show all bins' : `${needPickup} ${needPickup === 1 ? 'bin needs' : 'bins need'} pickup. Show bins, fullest first`}
+            aria-label={needPickup === 0 ? 'All clear, no bins need pickup. Open the pickup list' : `${needPickup} ${needPickup === 1 ? 'bin needs' : 'bins need'} pickup. Open the pickup list`}
             className="text-left rounded-2xl -m-2 p-2 hover:bg-white/40 transition-colors"
           >
             {/* the count is the title */}
@@ -1221,10 +1300,10 @@ function SummaryPage({
               <button
                 key={z.zone}
                 onClick={() => onZone(z.zone)}
-                aria-label={`${z.zone}: ${z.pickup} of ${z.total} bins need pickup. Show this zone`}
+                aria-label={`${z.zone}: ${z.pickup} of ${z.total} bins need pickup. Open this zone's pickup list`}
                 className="w-full flex items-center gap-3 min-h-11 py-2 px-2 -mx-2 text-left rounded-xl hover:bg-white/40 transition-colors"
               >
-                <span className="flex-1 text-sm font-semibold text-pine">{z.zone}</span>
+                <span className="flex-1 text-[15px] font-bold text-pine">{z.zone}</span>
                 <span className="text-sm text-pine"><span className="font-mono font-bold">{z.pickup}</span> of {z.total} bins</span>
                 <Icon name="arrowRight" size={16} />
               </button>
@@ -1232,11 +1311,11 @@ function SummaryPage({
           </div>
         </div>
 
-        <div className={`[grid-area:alerts] ${TILE} bg-white`}>
+        <div className={`[grid-area:alerts] ${TILE} glass`}>
           <div className="flex items-center gap-2 mb-2">
-            <p className="text-xs font-semibold text-pine">Alerts</p>
-            {alertCount > 0 && <span className="text-[10px] bg-rose/25 text-pine font-semibold px-2 py-0.5 rounded-full">{alertCount} active</span>}
-            <button onClick={onViewAllAlerts} className="ml-auto text-sm font-semibold text-teal min-h-11 px-2 -mr-2 hover:underline">View all</button>
+            <p className="text-xs font-bold text-pine">Alerts</p>
+            {alertCount > 0 && <span className="text-[11px] bg-rose/25 text-pine font-bold px-2 py-0.5 rounded-full">{alertCount} active</span>}
+            <button onClick={onViewAllAlerts} className="ml-auto text-sm font-bold text-teal min-h-11 px-2 -mr-2 hover:underline">View all</button>
           </div>
           {topAlerts.length === 0 ? (
             <p className="text-sm text-pine-muted py-2">No active alerts</p>
@@ -1245,10 +1324,10 @@ function SummaryPage({
               {topAlerts.map(a => {
                 const line = alertLine(a)
                 return (
-                  <button key={a.id} onClick={() => onAlert(a.binId)} className="w-full flex items-center gap-3 min-h-11 text-left rounded-xl px-2 -mx-2 hover:bg-ivory transition-colors">
+                  <button key={a.id} onClick={() => onAlert(a.binId)} className="w-full flex items-center gap-3 min-h-11 text-left rounded-xl px-2 -mx-2 hover:bg-white/60 transition-colors">
                     <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: line.hex }} />
                     <span className="text-sm min-w-0 truncate">
-                      <span className="font-semibold text-pine">{a.binName}</span> <span className="text-pine-muted">{line.text}</span>
+                      <span className="font-bold text-pine">{a.binName}</span> <span className="font-medium text-pine-muted">{line.text}</span>
                     </span>
                   </button>
                 )
@@ -1257,23 +1336,6 @@ function SummaryPage({
           )}
         </div>
       </div>
-    </>
-  )
-}
-
-function ComingSoon({ title, icon, text }: { title: string; icon: keyof typeof ICONS; text: string }) {
-  return (
-    <>
-      <h1 className="text-3xl lg:text-4xl font-semibold text-pine">{title}</h1>
-      <Reveal>
-      <div className={`${TILE} bg-white py-16 text-center`}>
-        <span className="mx-auto mb-4 w-14 h-14 rounded-full bg-olive-soft text-olive-ink flex items-center justify-center">
-          <Icon name={icon} size={26} />
-        </span>
-        <p className="text-lg font-semibold text-pine">Coming soon</p>
-        <p className="text-sm text-pine-muted mt-1 max-w-sm mx-auto">{text}</p>
-      </div>
-      </Reveal>
     </>
   )
 }
@@ -1287,35 +1349,136 @@ function StaffEditor({ member, isSelf, onToggleRole, onToggleZone }: {
   onToggleZone: (zone: Zone) => void
 }) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-3.5">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className="text-xs font-semibold text-stone-500">Role:</span>
-        <button
-          onClick={onToggleRole}
-          disabled={isSelf}
-          className="text-xs min-h-11 px-4 rounded-lg border border-stone-200 bg-white hover:border-mint transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-stone-200"
-        >
-          Toggle → {member.role === 'editor' ? 'viewer' : 'editor'}
-        </button>
-        {isSelf && <span className="text-xs text-stone-500">You can't change your own role. Ask another editor.</span>}
-      </div>
-      <div>
-        <p className="text-xs font-semibold text-stone-500 mb-2">Zone assignments:</p>
-        <div className="flex flex-wrap gap-2">
-          {ALL_ZONES.map(zone => (
+        <span className="w-14 text-[13px] font-bold text-pine-muted">Role</span>
+        <div className="inline-flex bg-ivory/80 rounded-full p-1" role="group" aria-label={`${member.name}'s role`}>
+          {(['viewer', 'editor'] as const).map(r => (
             <button
-              key={zone}
-              onClick={() => onToggleZone(zone)}
-              className={`text-xs min-h-11 px-4 rounded-lg border transition-colors font-medium ${
-                member.zones.includes(zone)
-                  ? 'bg-mint/20 border-mint text-mint-dark'
-                  : 'bg-white border-stone-200 text-stone-400 hover:border-stone-300'
-              }`}
+              key={r}
+              onClick={() => { if (member.role !== r) onToggleRole() }}
+              disabled={isSelf}
+              aria-pressed={member.role === r}
+              className={`px-4 min-h-10 rounded-full text-sm font-bold capitalize transition-colors disabled:cursor-not-allowed ${member.role === r ? 'bg-teal text-ivory' : 'text-pine-muted hover:text-pine disabled:hover:text-pine-muted'}`}
             >
-              {zone}
+              {r}
             </button>
           ))}
         </div>
+        {isSelf && <span className="text-xs font-medium text-pine-muted">You can't change your own role. Ask another editor.</span>}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="w-14 text-[13px] font-bold text-pine-muted">Zones</span>
+        {ALL_ZONES.map(zone => {
+          const on = member.zones.includes(zone)
+          return (
+            <button
+              key={zone}
+              onClick={() => onToggleZone(zone)}
+              aria-pressed={on}
+              className={`inline-flex items-center gap-1.5 min-h-10 rounded-full text-sm font-bold transition-colors ${on ? 'bg-teal-soft text-teal border-[1.5px] border-teal pl-3 pr-4' : 'glass text-pine-muted hover:text-pine px-4'}`}
+            >
+              {on && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12l5 5l10 -10" /></svg>}
+              {zone}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// on/off switch, 44px tall tap area around the 28px track
+function Switch({ on, label, onChange }: { on: boolean; label: string; onChange: (on: boolean) => void }) {
+  return (
+    <button
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      onClick={() => onChange(!on)}
+      className="relative shrink-0 w-14 h-11 flex items-center justify-center"
+    >
+      <span className={`w-12 h-7 rounded-full transition-colors ${on ? 'bg-teal' : 'bg-pine/15'}`} />
+      <span className={`absolute w-[22px] h-[22px] rounded-full bg-white shadow-[0_1px_3px_rgb(15_46_35/0.25)] transition-transform ${on ? 'translate-x-[10px]' : '-translate-x-[10px]'}`} />
+    </button>
+  )
+}
+
+// - 80% + in steps of 5
+function Stepper({ value, min, max, label, disabled, onChange }: {
+  value: number
+  min: number
+  max: number
+  label: string
+  disabled?: boolean
+  onChange: (v: number) => void
+}) {
+  const btn = 'w-9 h-10 flex items-center justify-center text-lg font-bold text-pine-muted hover:text-pine disabled:text-pine/20 transition-colors'
+  return (
+    <div className={`inline-flex items-center bg-ivory/85 rounded-full px-1 shrink-0 ${disabled ? 'opacity-50' : ''}`} role="group" aria-label={label}>
+      <button className={btn} disabled={disabled || value <= min} onClick={() => onChange(Math.max(min, value - 5))} aria-label={`Lower ${label}`}>−</button>
+      <span className="w-11 text-center text-sm font-bold text-pine tabular-nums" aria-live="polite">{value}%</span>
+      <button className={btn} disabled={disabled || value >= max} onClick={() => onChange(Math.min(max, value + 5))} aria-label={`Raise ${label}`}>+</button>
+    </div>
+  )
+}
+
+// admin: what sets off an alert. the fill level is the same "alert at" as on the details page
+function AlertSettingsCard({ settings, onChange }: { settings: AlertSettings; onChange: (next: AlertSettings) => void }) {
+  const set = (patch: Partial<AlertSettings>) => onChange({ ...settings, ...patch })
+  const rows: { title: string; text: string; on: boolean; toggle: (on: boolean) => void; stepper?: ReactNode }[] = [
+    {
+      title: 'Bin is getting full',
+      text: 'Alert when any compartment reaches this level. Bins at this level also go on the pickup list.',
+      on: settings.fillOn,
+      toggle: on => set({ fillOn: on }),
+      stepper: <Stepper value={settings.fillAt} min={10} max={100} label="full alert level" disabled={!settings.fillOn} onChange={v => set({ fillAt: v })} />,
+    },
+    {
+      title: 'Sensor stops sending',
+      text: 'Alert when a bin’s sensor goes offline.',
+      on: settings.offlineOn,
+      toggle: on => set({ offlineOn: on }),
+    },
+    {
+      title: 'Low battery',
+      text: 'Alert when a sensor’s battery drops to this level.',
+      on: settings.batteryOn,
+      toggle: on => set({ batteryOn: on }),
+      stepper: <Stepper value={settings.batteryAt} min={5} max={50} label="low battery level" disabled={!settings.batteryOn} onChange={v => set({ batteryAt: v })} />,
+    },
+    {
+      title: 'Daily email summary',
+      text: 'One email each morning listing the bins that need pickup. Emails stay off while we’re testing.',
+      on: settings.dailyEmail,
+      toggle: on => set({ dailyEmail: on }),
+    },
+  ]
+  return (
+    <div className={`${TILE} glass`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-lg font-bold text-pine">Alerts &amp; notifications</h2>
+        <button
+          onClick={() => onChange(DEFAULT_ALERT_SETTINGS)}
+          className="ml-auto text-sm font-bold text-pine-muted hover:text-pine min-h-11 px-2 -mr-2 transition-colors"
+        >
+          Reset
+        </button>
+      </div>
+      <p className="text-[13px] font-medium text-pine-muted mt-0.5 mb-2">Saved on this device for now. Once the backend stores them, they’ll apply to everyone.</p>
+      <div>
+        {rows.map(r => (
+          <div key={r.title} className="flex flex-wrap sm:flex-nowrap items-center gap-x-4 gap-y-2 py-3 border-t border-pine/[0.07]">
+            <div className="flex-1 min-w-[12rem]">
+              <p className="text-[15px] font-bold text-pine">{r.title}</p>
+              <p className="text-[13px] font-medium text-pine-muted">{r.text}</p>
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              {r.stepper}
+              <Switch on={r.on} label={r.title} onChange={r.toggle} />
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -1324,11 +1487,11 @@ function StaffEditor({ member, isSelf, onToggleRole, onToggleZone }: {
 // a viewer with no zones assigned sees this instead of bins
 function NoZonesNotice() {
   return (
-    <div className={`${TILE} bg-white py-16 text-center`}>
+    <div className={`${TILE} glass py-16 text-center`}>
       <span className="mx-auto mb-4 w-14 h-14 rounded-full bg-teal-soft text-teal flex items-center justify-center">
         <Icon name="mapPin" size={26} />
       </span>
-      <p className="text-lg font-semibold text-pine">No zones assigned yet</p>
+      <p className="text-lg font-bold text-pine">No zones assigned yet</p>
       <p className="text-sm text-pine-muted mt-1 max-w-sm mx-auto">Ask an admin to add you to a zone. Its bins and alerts will show up here.</p>
     </div>
   )
@@ -1344,17 +1507,36 @@ function minutesAgo(label: string) {
 // main app
 
 export default function App() {
-  // demo sign-in: the avatar cycles person 1 (editor), person 2 (viewer), person 3 (viewer, sample data)
-  const [currentUserId, setCurrentUserId] = useState('s1')
+  // demo sign-in: the login screen picks who you are (any password). the account menu can still
+  // cycle person 1 (editor), person 2 (viewer), person 3 (viewer, sample data) for demos
+  const [sessionId, setSessionId] = useState<string | null>(loadSession)
   const [filterZone, setFilterZone] = useState<Zone | 'All'>('All')
   const [sortBy, setSortBy] = useState<'fill' | 'zone' | 'status' | 'name'>('fill')
   const [filterStatus, setFilterStatus] = useState<Status | 'All'>('All')
-  const [alertThreshold, setAlertThreshold] = useState(80)
+  const [alertSettings, setAlertSettings] = useState<AlertSettings>(() => loadStored(STORE.alerts, DEFAULT_ALERT_SETTINGS))
+  const alertThreshold = alertSettings.fillAt
+  const setAlertThreshold = (next: number | ((t: number) => number)) =>
+    setAlertSettings(prev => ({ ...prev, fillAt: typeof next === 'function' ? next(prev.fillAt) : next }))
+  const [pickups, setPickups] = useState<PickupRecord[]>(() => loadStoredList(STORE.pickups, []))
+  const [pickupZone, setPickupZone] = useState<string>('All')
   const [dismissedIds, setDismissedIds] = useState<string[]>([])
   const [selectedBin, setSelectedBin] = useState<Tribin | null>(null)
   const [page, setPage] = useState<Page>('summary')
   const [editingStaff, setEditingStaff] = useState<string | null>(null)
-  const [staffList, setStaffList] = useState<StaffMember[]>(STAFF)
+  const [staffList, setStaffList] = useState<StaffMember[]>(() => loadStoredList(STORE.staff, STAFF))
+
+  useEffect(() => { saveStored(STORE.staff, staffList) }, [staffList])
+  useEffect(() => { saveStored(STORE.alerts, alertSettings) }, [alertSettings])
+  // only keep the last two weeks of pickups in the browser
+  useEffect(() => { saveStored(STORE.pickups, pickups.filter(p => Date.now() - p.at < 14 * 24 * 60 * 60 * 1000)) }, [pickups])
+  useEffect(() => {
+    try {
+      if (sessionId) localStorage.setItem(STORE.session, sessionId)
+      else localStorage.removeItem(STORE.session)
+    } catch {
+      // storage blocked: you stay signed in until the page reloads
+    }
+  }, [sessionId])
   const [apiBins, setApiBins] = useState<Tribin[]>(TRIBINS)
 
   // Poll the local Java API so simulated sensor readings show up automatically.
@@ -1388,7 +1570,9 @@ export default function App() {
   // role and zones come from the staff list, so changes in admin apply right away.
   // editors see every bin; viewers only bins in the zones an admin assigned them.
   // display filtering only: real access control has to live in the backend
-  const currentUser = staffList.find(s => s.id === currentUserId) ?? staffList[0]
+  const signedInUser = staffList.find(s => s.id === sessionId)
+  const currentUser = signedInUser ?? staffList[0]
+  const currentUserId = currentUser.id
   const currentRole = currentUser.role
   const visibleZones = currentRole === 'editor' ? ALL_ZONES : ALL_ZONES.filter(z => currentUser.zones.includes(z))
   const zonesKey = visibleZones.join()
@@ -1435,6 +1619,7 @@ export default function App() {
   // a filter or open card from before a user/zone change may point outside the new zones
   useEffect(() => {
     setFilterZone('All')
+    setPickupZone('All')
     setMapBinId(null)
     setSelectedBin(null)
   }, [currentUserId, zonesKey])
@@ -1464,14 +1649,14 @@ export default function App() {
     const out: Alert[] = []
     for (const bin of myBins) {
       if (bin.sensorStatus === 'offline') {
-        out.push({
+        if (alertSettings.offlineOn) out.push({
           id: `${bin.id}-offline`, binId: bin.id, binName: bin.name, zone: bin.zone,
           message: `Sensor offline, last contact ${bin.lastUpdated}`, severity: 'critical', time: bin.lastUpdated,
           kind: 'offline',
         })
       } else {
         for (const c of bin.compartments) {
-          if (c.fill >= alertThreshold) {
+          if (alertSettings.fillOn && c.fill >= alertThreshold) {
             const isCritical = c.fill >= CRITICAL_AT
             out.push({
               id: `${bin.id}-${c.label}`, binId: bin.id, binName: bin.name, zone: bin.zone,
@@ -1482,7 +1667,7 @@ export default function App() {
           }
         }
       }
-      if (bin.battery <= 20) {
+      if (alertSettings.batteryOn && bin.battery <= alertSettings.batteryAt) {
         out.push({
           id: `${bin.id}-battery`, binId: bin.id, binName: bin.name, zone: bin.zone,
           message: `Battery low: ${bin.battery}% remaining`, severity: 'warn', time: bin.lastUpdated,
@@ -1491,7 +1676,7 @@ export default function App() {
       }
     }
     return out
-  }, [alertThreshold, myBins])
+  }, [alertSettings, alertThreshold, myBins])
 
   const visibleAlerts = alerts.filter(a => !dismissedIds.includes(a.id))
   const unreadCount = visibleAlerts.length
@@ -1566,11 +1751,47 @@ export default function App() {
     setPage('details')
   }
 
-  // every bin, fullest first, so the ones needing pickup lead
-  function openPickupBins() {
-    setSortBy('fill')
-    openDetails({})
+  // the pickup list, optionally for one zone
+  function openPickups(zone: Zone | 'All') {
+    setPickupZone(zone)
+    setPage('pickup')
   }
+
+  function markEmptied(bin: PickupBin) {
+    const top = bin.compartments.reduce((a, b) => (b.fill > a.fill ? b : a))
+    setPickups(prev => [...prev, {
+      id: `${bin.id}-${Date.now()}`,
+      binId: bin.id, binName: bin.name, zone: bin.zone, location: bin.location,
+      stream: top.label, fill: top.fill,
+      byId: currentUser.id, byName: currentUser.name, at: Date.now(),
+    }])
+  }
+
+  function undoPickup(recordId: string) {
+    setPickups(prev => prev.filter(p => p.id !== recordId))
+  }
+
+  function logIn(staffId: string) {
+    setSessionId(staffId)
+    setPage('summary')
+    setDismissedIds([])
+  }
+
+  // new accounts start as viewers with no zones, until an editor assigns them
+  function createAccount(name: string, email: string) {
+    const id = `s${Date.now()}`
+    setStaffList(prev => [...prev, { id, name, email, role: 'viewer', zones: [] }])
+    logIn(id)
+  }
+
+  function logOut() {
+    setSessionId(null)
+    setEditingStaff(null)
+  }
+
+  const DEMO_CYCLE: Record<string, string> = { s1: 's2', s2: 's3' }
+  const nextDemoId = DEMO_CYCLE[currentUserId] ?? 's1'
+  const nextDemoName = staffList.find(s => s.id === nextDemoId)?.name ?? 'Person 1'
 
   // the whole campus, nothing picked
   function openMap() {
@@ -1616,25 +1837,32 @@ export default function App() {
     ))
   }
 
-  return (
-    <div className="min-h-screen bg-sage font-sans" style={{ fontFamily: 'Outfit, system-ui, sans-serif' }}>
-      <NavRail page={page} role={currentRole} onNavigate={setPage} />
+  if (!signedInUser) {
+    return <LoginPage staff={staffList} onLogin={logIn} onCreate={createAccount} />
+  }
 
+  return (
+    <div className="min-h-screen font-sans">
+      {/* the soft color glows behind every page */}
+      <div className="aura" aria-hidden="true" />
+      <NavRail page={page} role={currentRole} onNavigate={setPage} />
       {/* left padding clears the sidebar on desk; the footer's clears the floating tab bar otherwise */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 desk:pl-[calc(76px+2rem)] desk:pr-8 pt-5 desk:pt-8 pb-6 space-y-5 desk:space-y-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8 desk:pl-[calc(88px+2rem)] desk:pr-8 pt-5 desk:pt-8 pb-6 space-y-5 md:space-y-6">
         <TopBar
           userName={userName}
           role={currentRole}
           greeting={greeting}
           syncedLabel={syncedLabel}
           alertCount={unreadCount}
-          onSwitchUser={() => setCurrentUserId(id => ({ s1: 's2', s2: 's3' } as Record<string, string>)[id] ?? 's1')}
+          nextDemoUser={nextDemoName}
+          onSwitchUser={() => setSessionId(nextDemoId)}
+          onLogout={logOut}
           sampleData={sampleData}
           onBell={openAlerts}
         />
 
         {/* keyed by page so the content fades in on every switch; the header and nav stay put */}
-        <div key={page} className="animate-page-in motion-reduce:animate-none space-y-5 desk:space-y-6">
+        <div key={page} className="animate-page-in motion-reduce:animate-none space-y-5 md:space-y-6">
         {/* records when this page was opened, so only what is there on arrival animates */}
         <PageScope>
           {page === 'summary' && noZones && <NoZonesNotice />}
@@ -1653,16 +1881,29 @@ export default function App() {
               onShowOnMap={showOnMapFromSummary}
               onOpenDetail={setSelectedBin}
               onStatus={status => openDetails({ status })}
-              onZone={zone => openDetails({ zone })}
-              onPickup={openPickupBins}
+              onZone={zone => openPickups(zone)}
+              onPickup={() => openPickups('All')}
               onOpenMap={openMap}
               onAlert={showOnMapFromSummary}
               onViewAllAlerts={openAlerts}
             />
           )}
 
-          {page === 'pickup' && <ComingSoon title="Pickup List" icon="listCheck" text="The bins to empty next, in pickup order, will live here." />}
-          {page === 'history' && <HistoryPage bins={myBins} sampleData={sampleData} />}
+          {page === 'pickup' && noZones && <NoZonesNotice />}
+          {page === 'pickup' && !noZones && (
+            <PickupPage
+              bins={myBins}
+              zones={visibleZones}
+              zoneFilter={pickupZone}
+              onZoneFilter={setPickupZone}
+              threshold={alertThreshold}
+              pickups={pickups.filter(p => visibleZones.includes(p.zone as Zone))}
+              onEmptied={markEmptied}
+              onUndo={undoPickup}
+              onShowOnMap={showOnMap}
+            />
+          )}
+          {page === 'history' && <HistoryPage key={currentUserId} bins={myBins} sampleData={sampleData} />}
 
           {page === 'details' && (
             <>
@@ -1670,12 +1911,12 @@ export default function App() {
                 <button
                   onClick={() => setPage('summary')}
                   aria-label="Back to Summary"
-                  className="inline-flex items-center gap-1.5 bg-white text-pine text-sm font-semibold pl-3 pr-4 min-h-11 rounded-full hover:bg-white/70 transition-colors"
+                  className="inline-flex items-center gap-1.5 glass text-pine text-sm font-bold pl-3 pr-4 min-h-11 rounded-full hover:bg-white/80 transition-colors"
                 >
                   <Icon name="arrowLeft" size={18} />
                   Summary
                 </button>
-                <h1 className="text-3xl lg:text-4xl font-semibold text-pine">Details</h1>
+                <h1 className="text-3xl lg:text-4xl font-bold text-pine tracking-tight">Details</h1>
               </div>
               {/* content: bins + sidebar */}
               {noZones ? <NoZonesNotice /> : (
@@ -1685,28 +1926,28 @@ export default function App() {
                 <div ref={binsRef} className="flex-1 min-w-0 space-y-4 scroll-mt-4">
                   {/* filters */}
                   <div className="flex flex-wrap gap-2 items-center">
-                    <div className="flex items-center bg-white rounded-xl border border-stone-200 p-0.5 text-xs" role="group" aria-label="View">
+                    <div className="flex items-center glass rounded-full p-1 text-[13px]" role="group" aria-label="View">
                       {(['cards', 'map'] as const).map(mode => (
                         <button key={mode} onClick={() => { setViewMode(mode); setMapFocus(null) }} aria-pressed={viewMode === mode}
-                          className={`px-3 py-1.5 rounded-[10px] font-medium transition-colors ${viewMode === mode ? 'bg-teal text-ivory' :'text-stone-400 hover:text-stone-600'}`}
+                          className={`px-4 min-h-9 rounded-full font-bold transition-colors ${viewMode === mode ? 'bg-teal text-ivory' :'text-pine-muted hover:text-pine'}`}
                         >{mode === 'cards' ? 'Cards' : 'Map'}</button>
                       ))}
                     </div>
 
-                    <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
+                    <div className="flex items-center gap-1.5 glass rounded-full px-4 min-h-11 text-[13px]">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-                      <span className="text-stone-400 font-medium mr-1">Zone:</span>
+                      <span className="text-pine-muted font-semibold mr-1">Zone:</span>
                       <select value={filterZone} onChange={e => setFilterZone(e.target.value as any)}
-                        className="bg-transparent font-medium text-forest outline-none cursor-pointer pr-1">
+                        className="bg-transparent font-bold text-forest outline-none cursor-pointer pr-1">
                         <option value="All">All</option>
                         {visibleZones.map(z => <option key={z} value={z}>{z}</option>)}
                       </select>
                     </div>
 
-                    <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
-                      <span className="text-stone-400 font-medium mr-1">Status:</span>
+                    <div className="flex items-center gap-1.5 glass rounded-full px-4 min-h-11 text-[13px]">
+                      <span className="text-pine-muted font-semibold mr-1">Status:</span>
                       <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as any)}
-                        className="bg-transparent font-medium text-forest outline-none cursor-pointer pr-1">
+                        className="bg-transparent font-bold text-forest outline-none cursor-pointer pr-1">
                         <option value="All">All</option>
                         <option value="critical">Critical</option>
                         <option value="warn">Warning</option>
@@ -1715,10 +1956,10 @@ export default function App() {
                       </select>
                     </div>
 
-                    <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
-                      <span className="text-stone-400 font-medium mr-1">Sort:</span>
+                    <div className="flex items-center gap-1.5 glass rounded-full px-4 min-h-11 text-[13px]">
+                      <span className="text-pine-muted font-semibold mr-1">Sort:</span>
                       <select value={sortBy} onChange={e => setSortBy(e.target.value as any)}
-                        className="bg-transparent font-medium text-forest outline-none cursor-pointer pr-1">
+                        className="bg-transparent font-bold text-forest outline-none cursor-pointer pr-1">
                         <option value="fill">Fill % (high→low)</option>
                         <option value="status">Status</option>
                         <option value="zone">Zone</option>
@@ -1726,38 +1967,38 @@ export default function App() {
                       </select>
                     </div>
 
-                    <div className="flex items-center gap-1.5 bg-white rounded-xl border border-stone-200 px-3 py-2 text-xs">
-                      <span className="text-stone-400 font-medium">Alert at</span>
+                    <div className="flex items-center gap-1.5 glass rounded-full px-4 min-h-11 text-[13px]">
+                      <span className="text-pine-muted font-semibold">Alert at</span>
                       {/* -/+ look the same in every browser (ipad safari has no number arrows); before: pads the tap area */}
                       <button
                         onClick={() => setAlertThreshold(t => Math.max(10, t - 5))}
                         disabled={alertThreshold <= 10}
                         aria-label="Lower alert threshold"
-                        className="relative w-4 h-4 flex items-center justify-center font-semibold text-stone-400 hover:text-forest disabled:text-stone-200 transition-colors before:absolute before:-inset-x-1.5 before:-inset-y-3.5"
+                        className="relative w-5 h-5 flex items-center justify-center text-base font-bold text-pine-muted hover:text-forest disabled:text-pine/20 transition-colors before:absolute before:-inset-x-1.5 before:-inset-y-3.5"
                       >−</button>
                       <input
                         type="number" min={10} max={100} step={5} value={alertThreshold}
                         onChange={e => setAlertThreshold(Math.min(100, Math.max(10, Number(e.target.value) || 0)))}
                         aria-label="Alert threshold"
-                        className="w-7 text-center bg-transparent font-medium text-forest outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        className="w-8 text-center bg-transparent font-bold text-forest outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                       />
-                      <span className="text-stone-400 font-medium">%</span>
+                      <span className="text-pine-muted font-semibold">%</span>
                       <button
                         onClick={() => setAlertThreshold(t => Math.min(100, t + 5))}
                         disabled={alertThreshold >= 100}
                         aria-label="Raise alert threshold"
-                        className="relative w-4 h-4 flex items-center justify-center font-semibold text-stone-400 hover:text-forest disabled:text-stone-200 transition-colors before:absolute before:-inset-x-1.5 before:-inset-y-3.5"
+                        className="relative w-5 h-5 flex items-center justify-center text-base font-bold text-pine-muted hover:text-forest disabled:text-pine/20 transition-colors before:absolute before:-inset-x-1.5 before:-inset-y-3.5"
                       >+</button>
                     </div>
 
-                    <span className="ml-auto text-xs text-stone-400 font-mono">{filteredBins.length} bin{filteredBins.length !== 1 ? 's' : ''}</span>
+                    <span className="ml-auto text-[13px] font-bold text-pine-muted">{filteredBins.length} bin{filteredBins.length !== 1 ? 's' : ''}</span>
                   </div>
 
                   {/* grid or map */}
                   {shownCount === 0 ? (
-                    <div className="py-16 text-center text-stone-400">
+                    <div className="glass rounded-[28px] py-16 text-center text-pine-muted">
                       <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-2"><path d="M4 7h16M9 7V4h6v3M10 11v6M14 11v6M6 7l1 13h10l1-13"/></svg>
-                      <p className="text-sm">No bins match these filters.</p>
+                      <p className="text-sm font-semibold">No bins match these filters.</p>
                     </div>
                   ) : viewMode === 'map' ? (
                     <BinMap
@@ -1781,14 +2022,14 @@ export default function App() {
                 {/* right: alerts panel */}
                 <aside className="w-full lg:w-72 xl:w-80 shrink-0 space-y-3">
                   <div ref={alertsRef} className="flex items-center justify-between scroll-mt-4">
-                    <h2 className="text-xs uppercase tracking-widest text-stone-400 font-semibold">Alerts</h2>
+                    <h2 className="text-xs uppercase tracking-[0.12em] text-pine-muted font-bold">Alerts</h2>
                     {unreadCount > 0 && (
                       <div className="flex items-center gap-3">
                         <button
                           onClick={clearAllAlerts}
-                          className="relative text-[10px] font-semibold text-stone-400 hover:text-forest transition-colors before:absolute before:-inset-x-2 before:-inset-y-3"
+                          className="relative text-xs font-bold text-pine-muted hover:text-forest transition-colors before:absolute before:-inset-x-2 before:-inset-y-3"
                         >Clear all</button>
-                        <span className="text-[10px] bg-rose/25 text-pine font-semibold px-2 py-0.5 rounded-full">{unreadCount} active</span>
+                        <span className="text-[11px] bg-rose/25 text-pine font-bold px-2 py-0.5 rounded-full">{unreadCount} active</span>
                       </div>
                     )}
                   </div>
@@ -1796,9 +2037,9 @@ export default function App() {
                   <div data-lenis-prevent className="max-h-[600px] overflow-y-auto pr-0.5">
                     <Reveal className="space-y-2">
                     {visibleAlerts.length === 0 ? (
-                      <div className="py-10 text-center text-stone-400">
+                      <div className="glass rounded-2xl py-10 text-center text-pine-muted">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-1"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>
-                        <p className="text-xs">No active alerts</p>
+                        <p className="text-xs font-semibold">No active alerts</p>
                       </div>
                     ) : visibleAlerts.map(a => (
                       <AlertItem key={a.id} alert={a} onDismiss={dismissAlert} onSelect={alert => showOnMap(alert.binId)} />
@@ -1808,8 +2049,8 @@ export default function App() {
 
                   {/* summary stats */}
                   <Reveal>
-                  <div className="bg-white rounded-2xl border border-stone-200 p-4 mt-4">
-                    <p className="text-[11px] uppercase tracking-widest text-stone-400 font-semibold mb-3">Landfill Activity</p>
+                  <div className="glass rounded-3xl p-4 mt-4">
+                    <p className="text-[11px] uppercase tracking-[0.12em] text-pine-muted font-bold mb-3">Bin activity</p>
                     <div className="grid grid-cols-2 gap-3">
                       {[
                         { label: 'Total Bins', value: myBins.length, color: 'text-forest' },
@@ -1817,20 +2058,20 @@ export default function App() {
                         { label: 'Warning', value: myBins.filter(b => binStatus(b) === 'warn').length, color: 'text-status-warn-ink' },
                         { label: 'Offline', value: myBins.filter(b => b.sensorStatus === 'offline').length, color: 'text-status-offline-ink' },
                       ].map(s => (
-                        <div key={s.label} className="text-center py-2 bg-sage rounded-xl">
+                        <div key={s.label} className="text-center py-2.5 bg-ivory/75 rounded-2xl">
                           <p className={`font-mono font-bold text-xl ${s.color}`}>{s.value}</p>
-                          <p className="text-[10px] text-stone-400 mt-0.5">{s.label}</p>
+                          <p className="text-[11px] font-semibold text-pine-muted mt-0.5">{s.label}</p>
                         </div>
                       ))}
                     </div>
-                    <div className="mt-3 pt-3 border-t border-stone-100">
+                    <div className="mt-3 pt-3 border-t border-pine/[0.07]">
                       <div className="flex justify-between text-xs mb-1.5">
-                        <span className="text-stone-400">Landfill activity</span>
+                        <span className="font-semibold text-pine-muted">Average fill</span>
                         <span className="font-mono font-semibold text-forest">
                           {Math.round(myBins.reduce((s, b) => s + avgFill(b), 0) / Math.max(1, myBins.length))}%
                         </span>
                       </div>
-                      <div className="h-2 bg-stone-100 rounded-full overflow-hidden">
+                      <div className="h-2 bg-pine/10 rounded-full overflow-hidden">
                         <div className="h-full bg-olive rounded-full" style={{ width: `${Math.round(myBins.reduce((s, b) => s + avgFill(b), 0) / Math.max(1, myBins.length))}%` }} />
                       </div>
                     </div>
@@ -1844,42 +2085,41 @@ export default function App() {
 
           {/* manage tab */}
           {page === 'admin' && currentRole === 'editor' && (
-            <div className="space-y-5">
+            <div className="space-y-5 md:space-y-6">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h2 className="font-display text-2xl text-forest">Staff &amp; Zone Management</h2>
-                  <p className="text-sm text-stone-400 mt-0.5">Manage roles and zone assignments for your team.</p>
+                  <h1 className="text-3xl lg:text-4xl font-bold text-pine tracking-tight">Staff &amp; Zones</h1>
+                  <p className="text-sm md:text-[15px] font-medium text-pine-muted mt-1">Manage roles and zone assignments for your team.</p>
                 </div>
-                <span className="text-xs bg-mint/20 text-mint-dark px-3 py-1.5 rounded-full font-semibold whitespace-nowrap">Editors only</span>
+                <span className="text-xs bg-teal-soft text-teal px-3 py-1.5 rounded-full font-bold whitespace-nowrap">Editors only</span>
               </div>
-
               {/* phones: one card per person (the table doesn't fit) */}
               <Reveal className="md:hidden space-y-3">
                 {staffList.map(member => {
                   const editing = editingStaff === member.id
                   return (
-                    <div key={member.id} className="bg-white rounded-2xl border border-stone-200 p-4">
+                    <div key={member.id} className="glass rounded-3xl p-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-mint/20 flex items-center justify-center text-xs font-bold text-mint-dark shrink-0">
-                          {member.name.split(' ').map(n => n[0]).join('')}
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${member.role === 'editor' ? 'bg-pine text-ivory' : 'bg-teal-soft text-teal'}`}>
+                          {member.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-forest">{member.name}{member.id === currentUserId && <span className="text-stone-400 font-normal"> (you)</span>}</p>
-                          <p className="text-stone-400 font-mono text-xs truncate">{member.email}</p>
+                          <p className="font-bold text-forest">{member.name}{member.id === currentUserId && <span className="text-pine-muted font-medium"> (you)</span>}</p>
+                          <p className="text-pine-muted text-xs font-medium truncate">{member.email}</p>
                         </div>
-                        <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${member.role === 'editor' ? 'bg-mint/20 text-mint-dark' : 'bg-stone-100 text-stone-500'}`}>
+                        <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${member.role === 'editor' ? 'bg-teal-soft text-teal' : 'bg-offline-soft text-status-offline-ink'}`}>
                           {member.role}
                         </span>
                       </div>
                       {!editing && (
-                        <div className="flex flex-wrap gap-1 mt-3">
+                        <div className="flex flex-wrap gap-1.5 mt-3">
                           {member.zones.length === 0
-                            ? <span className="text-xs text-stone-400">No zones</span>
-                            : member.zones.map(z => <span key={z} className="text-[10px] bg-sage-dark text-stone-600 px-2 py-0.5 rounded-md">{z}</span>)}
+                            ? <span className="text-xs font-semibold text-status-warn-ink">No zones yet</span>
+                            : member.zones.map(z => <span key={z} className="text-[11px] font-bold bg-olive-soft text-olive-ink px-2.5 py-0.5 rounded-full">{z}</span>)}
                         </div>
                       )}
                       {editing && (
-                        <div className="mt-4 pt-4 border-t border-stone-100">
+                        <div className="mt-4 pt-4 border-t border-pine/[0.07]">
                           <StaffEditor
                             member={member}
                             isSelf={member.id === currentUserId}
@@ -1891,7 +2131,7 @@ export default function App() {
                       <button
                         onClick={() => setEditingStaff(editing ? null : member.id)}
                         aria-label={`${editing ? 'Done editing' : 'Edit'} ${member.name}`}
-                        className="mt-3 w-full min-h-11 rounded-xl border border-stone-200 text-sm font-semibold text-forest hover:border-mint transition-colors"
+                        className={`mt-3 w-full min-h-11 rounded-full text-sm font-bold transition-colors ${editing ? 'bg-pine text-ivory hover:bg-forest-light' : 'bg-ivory/80 text-forest hover:bg-ivory'}`}
                       >
                         {editing ? 'Done' : 'Edit'}
                       </button>
@@ -1899,65 +2139,67 @@ export default function App() {
                   )
                 })}
               </Reveal>
-
               {/* ipad and up: the table */}
               <Reveal className="hidden md:block">
-              <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
+              <div className="glass rounded-[28px] p-2 overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-stone-100 bg-sage">
-                      <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Name</th>
-                      <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Email</th>
-                      <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Role</th>
-                      <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-stone-400 font-semibold">Zones</th>
-                      <th className="px-5 py-3" />
+                    <tr className="bg-ivory/75">
+                      {['Name', 'Email', 'Role', 'Zones'].map((h, i) => (
+                        <th key={h} className={`text-left px-4 py-3 text-[11px] uppercase tracking-[0.08em] text-pine-muted font-bold ${i === 0 ? 'rounded-l-[20px]' : ''}`}>{h}</th>
+                      ))}
+                      <th className="px-4 py-3 rounded-r-[20px]"><span className="sr-only">Edit</span></th>
                     </tr>
                   </thead>
                   <tbody>
                     {staffList.map((member, i) => (
                       <Fragment key={member.id}>
-                        <tr className={`border-b border-stone-50 hover:bg-sage/50 transition-colors ${i === staffList.length - 1 ? 'border-0' : ''}`}>
-                          <td className="px-5 py-3.5">
+                        <tr className={i > 0 ? 'border-t border-pine/[0.07]' : ''}>
+                          <td className="px-4 py-3">
                             <div className="flex items-center gap-2.5">
-                              <div className="w-7 h-7 rounded-full bg-mint/20 flex items-center justify-center text-xs font-bold text-mint-dark">
-                                {member.name.split(' ').map(n => n[0]).join('')}
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${member.role === 'editor' ? 'bg-pine text-ivory' : 'bg-teal-soft text-teal'}`}>
+                                {member.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
                               </div>
-                              <span className="font-medium text-forest">{member.name}{member.id === currentUserId && <span className="text-stone-400 font-normal"> (you)</span>}</span>
+                              <span className="font-bold text-forest">{member.name}{member.id === currentUserId && <span className="text-pine-muted font-medium"> (you)</span>}</span>
                             </div>
                           </td>
-                          <td className="px-5 py-3.5 text-stone-400 font-mono text-xs">{member.email}</td>
-                          <td className="px-5 py-3.5">
-                            <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${member.role === 'editor' ? 'bg-mint/20 text-mint-dark' : 'bg-stone-100 text-stone-500'}`}>
+                          <td className="px-4 py-3 text-pine-muted font-medium text-[13px]">{member.email}</td>
+                          <td className="px-4 py-3">
+                            <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${member.role === 'editor' ? 'bg-teal-soft text-teal' : 'bg-offline-soft text-status-offline-ink'}`}>
                               {member.role}
                             </span>
                           </td>
-                          <td className="px-5 py-3.5">
-                            <div className="flex flex-wrap gap-1">
-                              {member.zones.map(z => (
-                                <span key={z} className="text-[10px] bg-sage-dark text-stone-600 px-2 py-0.5 rounded-md">{z}</span>
-                              ))}
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-1.5">
+                              {member.zones.length === 0
+                                ? <span className="text-xs font-semibold text-status-warn-ink">No zones yet</span>
+                                : member.zones.map(z => (
+                                  <span key={z} className="text-[11px] font-bold bg-olive-soft text-olive-ink px-2.5 py-0.5 rounded-full">{z}</span>
+                                ))}
                             </div>
                           </td>
-                          <td className="px-5 py-1 text-right">
+                          <td className="px-4 py-1 text-right">
                             {/* min-h-11: a 44px tap area around the small text */}
                             <button
                               onClick={() => setEditingStaff(editingStaff === member.id ? null : member.id)}
                               aria-label={`${editingStaff === member.id ? 'Done editing' : 'Edit'} ${member.name}`}
-                              className="min-h-11 px-3 -mr-3 text-xs text-stone-400 hover:text-forest transition-colors font-medium"
+                              className={`min-h-11 px-3 -mr-3 text-[13px] font-bold transition-colors ${editingStaff === member.id ? 'text-teal' : 'text-pine-muted hover:text-forest'}`}
                             >
                               {editingStaff === member.id ? 'Done' : 'Edit'}
                             </button>
                           </td>
                         </tr>
                         {editingStaff === member.id && (
-                          <tr key={`${member.id}-edit`} className="bg-sage/40">
-                            <td colSpan={5} className="px-5 py-4">
-                              <StaffEditor
-                                member={member}
-                                isSelf={member.id === currentUserId}
-                                onToggleRole={() => toggleStaffRole(member.id)}
-                                onToggleZone={zone => toggleZoneAssignment(member.id, zone)}
-                              />
+                          <tr key={`${member.id}-edit`}>
+                            <td colSpan={5} className="px-2 pb-2">
+                              <div className="bg-ivory/65 rounded-[20px] px-5 py-4">
+                                <StaffEditor
+                                  member={member}
+                                  isSelf={member.id === currentUserId}
+                                  onToggleRole={() => toggleStaffRole(member.id)}
+                                  onToggleZone={zone => toggleZoneAssignment(member.id, zone)}
+                                />
+                              </div>
                             </td>
                           </tr>
                         )}
@@ -1967,14 +2209,15 @@ export default function App() {
                 </table>
               </div>
               </Reveal>
+              <AlertSettingsCard settings={alertSettings} onChange={setAlertSettings} />
             </div>
           )}
 
           {/* viewers can't open admin */}
           {page === 'admin' && currentRole !== 'editor' && (
-            <div className="py-24 text-center">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-3"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
-              <p className="text-stone-500 text-sm">Editor access required.</p>
+            <div className="glass rounded-[28px] py-20 text-center text-pine-muted">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="block mx-auto mb-3"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+              <p className="text-sm font-semibold">Editor access required.</p>
             </div>
           )}
         </PageScope>
@@ -1985,8 +2228,8 @@ export default function App() {
       {selectedBin && <BinDetailModal bin={selectedBin} onClose={() => setSelectedBin(null)} />}
 
       {/* footer */}
-      <footer className="mt-10 border-t border-stone-200 pt-4 pb-28 desk:pb-4 px-6 desk:pl-[calc(76px+1.5rem)] text-center">
-        <p className="text-[11px] text-stone-400 font-mono">Bin Monitor · {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+      <footer className="mt-10 pt-4 pb-28 desk:pb-6 px-6 desk:pl-[calc(88px+1.5rem)] text-center">
+        <p className="text-xs font-semibold text-pine-muted">Bin Monitor · {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
       </footer>
     </div>
   )
