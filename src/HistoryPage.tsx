@@ -551,7 +551,7 @@ export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; 
           <select
             value=""
             onChange={e => e.target.value && openBin(e.target.value)}
-            className="appearance-none glass rounded-full pl-4 pr-9 min-h-10 text-sm font-bold text-pine cursor-pointer outline-none"
+            className="appearance-none glass rounded-full pl-4 pr-9 min-h-10 w-[6.5rem] text-sm font-bold text-pine cursor-pointer outline-none"
           >
             <option value="">More</option>
             {rest.map(b => <option key={b.id} value={b.id}>{b.name} · {b.location}</option>)}

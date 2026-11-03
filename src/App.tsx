@@ -999,7 +999,7 @@ function TopBar({ userName, role, greeting, syncedLabel, alertCount, sampleData,
           </span>
         </button>
         {menuOpen && (
-          <div role="menu" className="absolute left-0 top-full mt-2 z-50 w-60 glass-blur bg-white/90! rounded-2xl p-1.5 shadow-xl">
+          <div role="menu" className="absolute left-0 top-full mt-2 z-50 w-60 glass-blur bg-white/[0.97]! rounded-2xl p-1.5 shadow-xl">
             <button role="menuitem" className={menuItem} onClick={() => { setMenuOpen(false); onSwitchUser() }}>
               Switch demo user
               <span className="block text-xs font-medium text-pine-muted -mt-0.5 pb-1">to {nextDemoUser}</span>
