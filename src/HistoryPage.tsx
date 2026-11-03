@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { PointerEvent } from 'react'
+import type { KeyboardEvent, PointerEvent } from 'react'
 
 // history page: fill levels over time for one tribin, from /api/tribins/{id}/history.
 // kept in its own file so App.tsx only needs an import and one line
@@ -217,6 +217,136 @@ function downloadCsv(filename: string, rows: (string | number)[][]) {
 }
 
 const TILE = 'rounded-3xl p-5 desk:p-6 glass'
+
+// type a bin number or place, or open the list and pick one. "All bins" is the overview
+function BinPicker({ bins, value, onPick }: { bins: HistoryBin[]; value: string | null; onPick: (id: string | null) => void }) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [active, setActive] = useState(0)
+  const boxRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const picked = bins.find(b => b.id === value)
+
+  // fullest first, then whatever matches the typing (name, number, place or zone)
+  const q = query.trim().toLowerCase()
+  const sorted = [...bins].sort((a, b) => fullest(b) - fullest(a))
+  const matches = q ? sorted.filter(b => `${b.name} ${b.id} ${b.location} ${b.zone}`.toLowerCase().includes(q)) : sorted
+  const showAll = !q || 'all bins'.includes(q)
+  const options: { id: string | null; bin?: HistoryBin }[] = [...(showAll ? [{ id: null }] : []), ...matches.map(b => ({ id: b.id, bin: b }))]
+  const optionId = (i: number) => `history-bin-option-${i}`
+
+  // a tap anywhere else closes the list
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: globalThis.PointerEvent) => { if (!boxRef.current?.contains(e.target as Node)) setOpen(false) }
+    window.addEventListener('pointerdown', onDown)
+    return () => window.removeEventListener('pointerdown', onDown)
+  }, [open])
+
+  // keep the highlighted option in view while using the arrow keys
+  useEffect(() => {
+    if (open) document.getElementById(optionId(active))?.scrollIntoView({ block: 'nearest' })
+  }, [active, open])
+
+  function pick(id: string | null) {
+    onPick(id)
+    setOpen(false)
+    setQuery('')
+    inputRef.current?.blur()
+  }
+
+  function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (!open) return setOpen(true)
+      const step = e.key === 'ArrowDown' ? 1 : -1
+      setActive(i => Math.min(options.length - 1, Math.max(0, i + step)))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const o = options[active]
+      if (open && o) pick(o.id)
+    } else if (e.key === 'Escape') {
+      setOpen(false)
+      setQuery('')
+      inputRef.current?.blur()
+    }
+  }
+
+  const shown = open ? query : picked ? `${picked.name} · ${picked.location}` : 'All bins'
+  return (
+    <div ref={boxRef} className="relative z-20 w-full max-w-lg">
+      <label htmlFor="history-bin" className="sr-only">Pick a bin</label>
+      <svg viewBox="0 0 24 24" className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none text-pine-muted" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 10m-7 0a7 7 0 1 0 14 0a7 7 0 1 0 -14 0M21 21l-6 -6" /></svg>
+      <input
+        ref={inputRef}
+        id="history-bin"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls="history-bin-list"
+        aria-autocomplete="list"
+        aria-activedescendant={open && options[active] ? optionId(active) : undefined}
+        autoComplete="off"
+        value={shown}
+        placeholder="Type a bin number or place"
+        onFocus={e => { setOpen(true); setQuery(''); setActive(0); e.currentTarget.select() }}
+        onClick={() => setOpen(true)}
+        onChange={e => { setQuery(e.target.value); setOpen(true); setActive(0) }}
+        onKeyDown={onKeyDown}
+        className="w-full min-h-12 glass-blur rounded-full pl-12 pr-12 text-[15px] font-bold text-pine placeholder:text-pine-muted placeholder:font-semibold outline-none focus:ring-2 focus:ring-teal/30 truncate"
+      />
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label={open ? 'Close bin list' : 'Open bin list'}
+        onClick={() => { if (open) setOpen(false); else inputRef.current?.focus() }}
+        className="absolute right-1 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full flex items-center justify-center text-pine hover:bg-pine/5"
+      >
+        <svg viewBox="0 0 24 24" className={`w-5 h-5 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+      </button>
+      {open && (
+        <ul
+          id="history-bin-list"
+          role="listbox"
+          aria-label="Bins"
+          data-lenis-prevent
+          className="absolute left-0 right-0 top-full mt-2 max-h-80 overflow-y-auto glass-blur bg-white/[0.96]! rounded-3xl p-1.5 shadow-xl origin-top animate-pop-in motion-reduce:animate-none"
+        >
+          {options.length === 0 && <li className="px-4 py-3 text-sm font-semibold text-pine-muted">No bins match “{query.trim()}”</li>}
+          {options.map((o, i) => {
+            const b = o.bin
+            const selected = o.id === value
+            return (
+              <li
+                key={o.id ?? 'all'}
+                id={optionId(i)}
+                role="option"
+                aria-selected={selected}
+                onPointerDown={e => e.preventDefault()}
+                onClick={() => pick(o.id)}
+                onPointerEnter={() => setActive(i)}
+                className={`flex items-center gap-3 min-h-11 px-3.5 py-2 rounded-2xl cursor-pointer transition-colors ${i === active ? 'bg-pine/[0.06]' : ''}`}
+              >
+                {b ? (
+                  <>
+                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${b.sensorStatus === 'offline' ? 'bg-status-offline' : STATUS_DOT[statusOf(fullest(b))]}`} />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-bold text-pine">{b.name}</span>
+                      <span className="block text-xs font-medium text-pine-muted truncate">{b.location} · {b.zone}</span>
+                    </span>
+                    <span className="text-xs font-bold text-pine-muted tabular-nums">{b.sensorStatus === 'offline' ? 'Offline' : `${Math.round(fullest(b))}%`}</span>
+                  </>
+                ) : (
+                  <span className="flex-1 text-sm font-bold text-pine">All bins <span className="font-medium text-pine-muted">· overview</span></span>
+                )}
+                {selected && <svg viewBox="0 0 24 24" className="w-4 h-4 text-teal shrink-0" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12l5 5l10 -10" /></svg>}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
 
 function Message({ title, text }: { title: string; text: string }) {
   return (
@@ -533,42 +663,17 @@ export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; 
     setHoverT(null)
   }
 
-  // the picker: all bins, the five fullest, then a menu with the rest
-  const byFill = [...bins].sort((a, b) => fullest(b) - fullest(a))
-  const quick = byFill.slice(0, 5)
-  if (bin && !quick.includes(bin)) quick.push(bin)
-  const rest = byFill.filter(b => !quick.includes(b))
-  const chipCls = (on: boolean) => `shrink-0 px-4 min-h-10 rounded-full text-sm font-bold transition-colors ${on ? 'bg-pine text-ivory' : 'glass text-pine hover:bg-white/80'}`
-  const picker = (
-    <div className="flex gap-2 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap pb-1" role="group" aria-label="Pick a bin">
-      <button onClick={() => openBin(null)} aria-pressed={!bin} className={chipCls(!bin)}>All bins</button>
-      {quick.map(b => (
-        <button key={b.id} onClick={() => openBin(b.id)} aria-pressed={b.id === activeId} className={chipCls(b.id === activeId)}>{b.name}</button>
-      ))}
-      {rest.length > 0 && (
-        <label className="relative shrink-0">
-          <span className="sr-only">More bins</span>
-          <select
-            value=""
-            onChange={e => e.target.value && openBin(e.target.value)}
-            className="appearance-none glass rounded-full pl-4 pr-9 min-h-10 w-[6.5rem] text-sm font-bold text-pine cursor-pointer outline-none"
-          >
-            <option value="">More</option>
-            {rest.map(b => <option key={b.id} value={b.id}>{b.name} · {b.location}</option>)}
-          </select>
-          <svg viewBox="0 0 24 24" className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-pine" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-        </label>
-      )}
-    </div>
-  )
+  const picker = <BinPicker bins={bins} value={activeId ?? null} onPick={openBin} />
 
   if (!bin) {
     return (
       <>
         <h1 className="text-3xl lg:text-4xl font-bold text-pine tracking-tight">History</h1>
         {picker}
-        <Overview bins={bins} />
-        <BinGroups bins={bins} onPick={openBin} />
+        <div key="all" className="space-y-5 md:space-y-6 animate-page-in motion-reduce:animate-none">
+          <Overview bins={bins} />
+          <BinGroups bins={bins} onPick={openBin} />
+        </div>
       </>
     )
   }
@@ -610,6 +715,8 @@ export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; 
       <h1 className="text-3xl lg:text-4xl font-bold text-pine tracking-tight">History</h1>
       {picker}
 
+      {/* keyed by the bin, so picking another one dissolves into it */}
+      <div key={bin.id} className="space-y-5 md:space-y-6 animate-page-in motion-reduce:animate-none">
       {/* the bin, with how full each compartment is right now */}
       <div className={`${TILE} flex items-center gap-5`}>
         <div className="flex-1 min-w-0">
@@ -763,6 +870,7 @@ export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; 
           </div>
         </>
       )}
+      </div>
     </>
   )
 }
