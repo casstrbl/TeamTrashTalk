@@ -253,6 +253,16 @@ private static void loadInitialStaffData() {
 								
 			// Insert the staff member into the database.
 			staffMemberStatement.executeUpdate();
+
+			// Upgrade existing local H2 databases with password support.
+            // The shared Supabase database will be updated manually.
+			if ("H2".equals(connection.getMetaData().getDatabaseProductName())) {
+				try (Statement statement = connection.createStatement()) {
+					statement.executeUpdate(
+							"ALTER TABLE staff ADD COLUMN IF NOT EXISTS password_hash TEXT"
+					);
+				}
+			}
 		}
 	} catch (SQLException e) {
 	
