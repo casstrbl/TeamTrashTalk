@@ -13,6 +13,10 @@ Smart campus waste bin monitoring system for the Sac State sustainability office
 
 ## Run the backend
 
+**Shortcut (Mac/Linux, needs a JDK):** run `pnpm dev:all` from the project folder. It builds and starts the backend with fake sensors on (local H2 only, never Supabase), then starts the website. Ctrl + C stops both. The backend's output goes to `backend/out/backend.log`.
+
+The fake sensors fill each compartment at its own pace (landfill fastest, compost slowest), busy spots fill faster, readings wobble a little like a real sensor, and full bins get emptied after a while. `SIM_SPEED` sets how much faster than real life it runs (default 60, so one real minute is one hour). Use `SIM_SPEED=30 pnpm dev:all` for slower, or `pnpm dev:all --fresh` to start the bins over from the seed data.
+
 You need a JDK and either VS Code (with Extension Pack for Java) or Eclipse.
 
 1. Set `backend/src` as the source folder, since the packages start with `main.java...`. In VS Code, run `Java: Configure Classpath`, open the Sources tab and add `backend/src`.
