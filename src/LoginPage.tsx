@@ -103,7 +103,8 @@ export default function LoginPage({ staff, onLogin, onCreate, onScrollTop }: {
     e.preventDefault()
     const clean = email.trim().toLowerCase()
     if (!name.trim()) return setError('Enter your name.')
-    if (!/^[^\s@]+@csus\.edu$/.test(clean)) return setError('Use your Sac State email (ends in @csus.edu).')
+    // any email works, not just @csus.edu (that one's tied to the school sso)
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return setError('Enter a valid email address.')
     if (staff.some(s => s.email.toLowerCase() === clean)) return setError('That email already has an account. Log in instead.')
     if (password.length < 8) return setError('Use at least 8 characters for your password.')
     onCreate(name.trim(), clean)
@@ -146,12 +147,12 @@ export default function LoginPage({ staff, onLogin, onCreate, onScrollTop }: {
             <div className="flex-1 md:flex-none flex flex-col justify-center gap-7">
               <div className="space-y-3">
                 <BinLogo size={56} glow className="-ml-1.5" />
-                <h1 className="text-4xl md:text-5xl font-semibold tracking-tight">Welcome back</h1>
-                <p className="text-white/70">Log in with your Sac State email.</p>
+                <h1 className="text-4xl md:text-5xl font-semibold tracking-tight">Welcome back!</h1>
+                <p className="text-white/70">Log in with your email.</p>
               </div>
               <div className="space-y-5">
-                <Field label="Campus email">
-                  <input type="email" inputMode="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@csus.edu" className={INPUT} />
+                <Field label="Email">
+                  <input type="email" inputMode="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" className={INPUT} />
                 </Field>
                 <Field label="Password">
                   <PasswordInput value={password} onChange={setPassword} autoComplete="current-password" />
@@ -167,7 +168,7 @@ export default function LoginPage({ staff, onLogin, onCreate, onScrollTop }: {
               </p>
               {/* demo only: there's no password check yet, so say which emails exist */}
               <div className="glass-night rounded-2xl px-4 py-3 text-sm text-white/75 leading-relaxed">
-                <span className="font-semibold text-white">Demo accounts:</span> person1@csus.edu (editor), person2@csus.edu (viewer), person3@csus.edu (viewer, sample data). Any password works.
+                <span className="font-semibold text-white">Demo accounts:</span> person1@example.com (editor), person2@example.com (viewer), person3@example.com (viewer, sample data). Any password works.
               </div>
             </div>
           </form>
@@ -185,8 +186,8 @@ export default function LoginPage({ staff, onLogin, onCreate, onScrollTop }: {
                 <Field label="Your name">
                   <input type="text" autoComplete="name" value={name} onChange={e => setName(e.target.value)} placeholder="First and last name" className={INPUT} />
                 </Field>
-                <Field label="Campus email">
-                  <input type="email" inputMode="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@csus.edu" className={INPUT} />
+                <Field label="Email">
+                  <input type="email" inputMode="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" className={INPUT} />
                 </Field>
                 <Field label="Password">
                   <PasswordInput value={password} onChange={setPassword} autoComplete="new-password" />

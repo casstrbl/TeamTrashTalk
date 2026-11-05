@@ -216,6 +216,44 @@ function downloadCsv(filename: string, rows: (string | number)[][]) {
   URL.revokeObjectURL(url)
 }
 
+// same columns for one bin or all bins: one row per compartment per reading
+const CSV_HEADER = ['Bin ID', 'Location', 'Zone', 'Waste stream', 'Fill (%)', 'Date', 'Time']
+type CsvRow = { t: number; cells: (string | number)[] }
+
+function binCsvRows(bin: HistoryBin, rows: Row[]): CsvRow[] {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const out: CsvRow[] = []
+  for (const r of [...rows].reverse()) {
+    const d = new Date(r.t)
+    const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+    const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    for (const st of STREAMS) {
+      const p = r.values[st]
+      if (p) out.push({ t: r.t, cells: [bin.id, bin.location, bin.zone, st, Math.round(p.pct), date, time] })
+    }
+  }
+  return out
+}
+
+// the glass "export csv" pill, used on the overview and on a single bin
+function ExportButton({ onClick, disabled, busy, title, onPage }: { onClick: () => void; disabled?: boolean; busy?: boolean; title: string; onPage?: boolean }) {
+  // onPage: sits on the aura next to the bin picker, so it matches the picker's glass and height
+  const look = onPage
+    ? 'glass-blur hover:bg-white/80 rounded-full pl-4 pr-5 min-h-12 text-[15px]'
+    : 'bg-ivory/80 hover:bg-ivory rounded-full pl-3 pr-3.5 min-h-10 text-xs'
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled || busy}
+      title={title}
+      className={`inline-flex items-center gap-1.5 shrink-0 font-bold text-pine transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${look}`}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2M7 11l5 5l5 -5M12 4l0 12" /></svg>
+      {busy ? 'Exporting…' : 'Export CSV'}
+    </button>
+  )
+}
+
 const TILE = 'rounded-3xl p-5 desk:p-6 glass'
 
 // type a bin number or place, or open the list and pick one. "All bins" is the overview
@@ -584,7 +622,7 @@ function FillChart({ points, color, label, hoverT, onHover }: {
   )
 }
 
-export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; sampleData: boolean }) {
+export default function HistoryPage({ bins, sampleData, canExport }: { bins: HistoryBin[]; sampleData: boolean; canExport: boolean }) {
   // starts on the fullest bin, like the mockup. null = the all-bins overview
   const [binId, setBinId] = useState<string | null>(() => {
     const online = bins.filter(b => b.sensorStatus === 'online')
@@ -595,6 +633,8 @@ export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; 
   const [series, setSeries] = useState<Record<Stream, Point[]> | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [hoverT, setHoverT] = useState<number | null>(null)
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState(false)
 
   // if the picked bin isn't in the list any more (zone change), go back to the overview
   const bin = bins.find(b => b.id === binId)
@@ -665,11 +705,44 @@ export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; 
 
   const picker = <BinPicker bins={bins} value={activeId ?? null} onPick={openBin} />
 
+  // every bin's readings in one file, asked for when the button is pressed (the overview
+  // only has each bin's current fill). editors only
+  async function exportAll() {
+    const apiUrl = import.meta.env.VITE_API_URL ?? ''
+    setExporting(true)
+    setExportError(false)
+    try {
+      const perBin = await Promise.all(bins.map(async b => {
+        const res = await fetch(`${apiUrl}/api/tribins/${b.id}/history`, { cache: 'no-store' })
+        if (!res.ok) throw new Error('history request failed')
+        const data: ApiReading[] = await res.json()
+        return binCsvRows(b, toRows(toSeries(data)))
+      }))
+      const all = perBin.flat().sort((a, b) => a.t - b.t)
+      const d = new Date()
+      const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      downloadCsv(`all-bins-history-${day}.csv`, [CSV_HEADER, ...all.map(r => r.cells)])
+    } catch {
+      setExportError(true)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   if (!bin) {
     return (
       <>
         <h1 className="text-3xl lg:text-4xl font-bold text-pine tracking-tight">History</h1>
-        {picker}
+        {/* editors get export next to the picker, lined up with the cards' right edge */}
+        {canExport && !sampleData ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <div className="flex-1 min-w-0">{picker}</div>
+              <ExportButton onPage onClick={() => void exportAll()} busy={exporting} title="Download every reading for every bin as a spreadsheet (CSV)" />
+            </div>
+            {exportError && <p role="alert" className="text-xs font-semibold text-status-critical-ink text-right">Can’t reach the backend, try again once it’s running.</p>}
+          </div>
+        ) : picker}
         <div key="all" className="space-y-5 md:space-y-6 animate-page-in motion-reduce:animate-none">
           <Overview bins={bins} />
           <BinGroups bins={bins} onPick={openBin} />
@@ -696,18 +769,11 @@ export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; 
     setHoverT(null)
   }
 
+  // this bin's readings in the picked time range, oldest first. editors only (the client brief)
   function exportCsv() {
+    if (!bin) return
     const label = RANGES.find(r => r.key === range)!.label.replace(' ', '')
-    downloadCsv(`${bin!.name.replace(/\s+/g, '-').toLowerCase()}-history-${label}.csv`, [
-      ['Time', ...STREAMS.flatMap(s => [`${s} (%)`, `${s} (cm)`])],
-      ...[...rows].reverse().map(r => [
-        new Date(r.t).toLocaleString(),
-        ...STREAMS.flatMap(s => {
-          const p = r.values[s]
-          return p ? [Math.round(p.pct), p.cm.toFixed(1)] : ['', '']
-        }),
-      ]),
-    ])
+    downloadCsv(`${bin.id.toLowerCase()}-history-${label}.csv`, [CSV_HEADER, ...binCsvRows(bin, rows).map(r => r.cells)])
   }
 
   return (
@@ -838,14 +904,10 @@ export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; 
           <div className={TILE}>
             <div className="flex items-center justify-between gap-3 mb-2">
               <h2 className="text-lg font-bold text-pine">Latest readings</h2>
-              <button
-                onClick={exportCsv}
-                className="inline-flex items-center gap-1.5 bg-ivory/80 hover:bg-ivory rounded-full pl-3 pr-3.5 min-h-10 text-xs font-bold text-pine transition-colors"
-                title="Download every reading in this time range as a spreadsheet (CSV)"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2M7 11l5 5l5 -5M12 4l0 12" /></svg>
-                Export CSV
-              </button>
+              {/* editors only, viewers just see the table */}
+              {canExport && (
+                <ExportButton onClick={exportCsv} disabled={rows.length === 0} title="Download every reading in this time range as a spreadsheet (CSV)" />
+              )}
             </div>
             <table className="w-full text-sm">
               <thead>

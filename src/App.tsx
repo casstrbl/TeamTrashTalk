@@ -79,11 +79,11 @@ interface StaffMember {
 // data
 
 const STAFF: StaffMember[] = [
-  { id: 's1', name: 'Person 1', role: 'editor', zones: ['Zone A', 'Zone B'], email: 'person1@csus.edu' },
-  { id: 's2', name: 'Person 2', role: 'viewer', zones: ['Zone A'], email: 'person2@csus.edu' },
-  { id: 's3', name: 'Person 3', role: 'viewer', zones: ['Zone A'], email: 'person3@csus.edu' },
-  { id: 's4', name: 'Person 4', role: 'viewer', zones: ['Zone B'], email: 'person4@csus.edu' },
-  { id: 's5', name: 'Person 5', role: 'viewer', zones: ['Zone B'], email: 'person5@csus.edu' },
+  { id: 's1', name: 'Person 1', role: 'editor', zones: ['Zone A', 'Zone B'], email: 'person1@example.com' },
+  { id: 's2', name: 'Person 2', role: 'viewer', zones: ['Zone A'], email: 'person2@example.com' },
+  { id: 's3', name: 'Person 3', role: 'viewer', zones: ['Zone A'], email: 'person3@example.com' },
+  { id: 's4', name: 'Person 4', role: 'viewer', zones: ['Zone B'], email: 'person4@example.com' },
+  { id: 's5', name: 'Person 5', role: 'viewer', zones: ['Zone B'], email: 'person5@example.com' },
 ]
 
 // bins come from mockBins.ts until the site reads from the api
@@ -118,7 +118,7 @@ const DEFAULT_ALERT_SETTINGS: AlertSettings = { fillOn: true, fillAt: 80, offlin
 // changes survive a reload), alert settings and pickup records. it's per browser, and can be
 // missing or blocked (private mode), so every read and write is guarded. the backend should own
 // all of this later
-const STORE = { session: 'tt-session', staff: 'tt-staff-v1', alerts: 'tt-alert-settings-v2', pickups: 'tt-pickups-v1' }
+const STORE = { session: 'tt-session', staff: 'tt-staff-v2', alerts: 'tt-alert-settings-v2', pickups: 'tt-pickups-v1' }
 
 function loadStored<T>(key: string, fallback: T): T {
   try {
@@ -1428,7 +1428,7 @@ function Stepper({ value, min, max, label, disabled, onChange }: {
 // "alert at" as on the details page
 function AlertSettingsCard({ settings, onChange }: { settings: AlertSettings; onChange: (next: AlertSettings) => void }) {
   const set = (patch: Partial<AlertSettings>) => onChange({ ...settings, ...patch })
-  const rows: { title: string; text: string; on: boolean; toggle: (on: boolean) => void; stepper?: ReactNode }[] = [
+  const rows: { title: string; text?: string; on: boolean; toggle: (on: boolean) => void; stepper?: ReactNode }[] = [
     {
       title: 'Bin is getting full',
       text: 'Alert when any compartment reaches this level. Bins at this level also go on the pickup list.',
@@ -1451,14 +1451,13 @@ function AlertSettingsCard({ settings, onChange }: { settings: AlertSettings; on
     },
     {
       title: 'Daily email summary',
-      text: 'One email each morning listing the bins that need pickup. Emails stay off while we’re testing.',
       on: settings.dailyEmail,
       toggle: on => set({ dailyEmail: on }),
     },
   ]
   return (
     <div className={`${TILE} glass`}>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 mb-2">
         <h2 className="text-lg font-bold text-pine">Your alerts &amp; notifications</h2>
         <button
           onClick={() => onChange(DEFAULT_ALERT_SETTINGS)}
@@ -1467,13 +1466,12 @@ function AlertSettingsCard({ settings, onChange }: { settings: AlertSettings; on
           Reset
         </button>
       </div>
-      <p className="text-[13px] font-medium text-pine-muted mt-0.5 mb-2">These only change your own alerts. Saved on this device for now, until the backend can store them.</p>
       <div>
         {rows.map(r => (
           <div key={r.title} className="flex flex-wrap sm:flex-nowrap items-center gap-x-4 gap-y-2 py-3 border-t border-pine/[0.07]">
             <div className="flex-1 min-w-[12rem]">
               <p className="text-[15px] font-bold text-pine">{r.title}</p>
-              <p className="text-[13px] font-medium text-pine-muted">{r.text}</p>
+              {r.text && <p className="text-[13px] font-medium text-pine-muted">{r.text}</p>}
             </div>
             <div className="flex items-center gap-2 ml-auto">
               {r.stepper}
@@ -1925,7 +1923,7 @@ export default function App() {
               onShowOnMap={showOnMap}
             />
           )}
-          {page === 'history' && <HistoryPage key={currentUserId} bins={myBins} sampleData={sampleData} />}
+          {page === 'history' && <HistoryPage key={currentUserId} bins={myBins} sampleData={sampleData} canExport={currentRole === 'editor'} />}
 
           {page === 'details' && (
             <>

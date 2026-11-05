@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:all": "sh scripts/dev-all.sh",
     "build": "vite build",
     "preview": "vite preview",
     "format": "oxfmt"
