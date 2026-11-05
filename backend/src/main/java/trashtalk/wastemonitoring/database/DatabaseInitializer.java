@@ -65,6 +65,7 @@ public class DatabaseInitializer {
 				binID INT PRIMARY KEY,
 				triBinID INT NOT NULL,
 				binType VARCHAR(20) NOT NULL,
+				status VARCHAR(10) NOT NULL,
 				wasteHeight DOUBLE PRECISION,
 				
 				FOREIGN KEY (triBinID)
@@ -82,8 +83,10 @@ public class DatabaseInitializer {
 				triBinID INT NOT NULL,
 				zone CHAR,
 				message TEXT,
-				severity VARCHAR(20),
-				time TIMESTAMP
+				severity VARCHAR(20) NOT NULL,
+				time TIMESTAMP NOT NULL,
+				kind VARCHAR(20) NOT NULL,
+				acknowledged BOOLEAN DEFAULT FALSE
 				)
 				""";
 		
@@ -173,7 +176,7 @@ private static void loadInitialTriBinData() {
 	// SQL statement to insert an individual bin into the bins table
 	String insertBin = """
 			INSERT INTO bins
-			(binID, triBinID, binType, wasteHeight)
+			(binID, triBinID, binType, status, wasteHeight)
 			VALUES (?, ?, ?, ?)
 			""";
 	
@@ -207,7 +210,8 @@ private static void loadInitialTriBinData() {
 				binStatement.setInt(1, bin.getBinID());
 				binStatement.setInt(2, triBin.getTriBinID());
 				binStatement.setString(3, bin.getBinType().name());
-				binStatement.setDouble(4, bin.getWasteHeight());
+				binStatement.setString(4, bin.getStatus().name());
+				binStatement.setDouble(5, bin.getWasteHeight());
 				
 				// Insert the bin into the database
 				binStatement.executeUpdate();

@@ -109,22 +109,4 @@ public class BinDataLoader {
 		// how long ago the last reading was, in minutes
 		public int lastUpdatedMinutesAgo;
 	}
-	
-	/**
-	 * Represents the structure of an individual bin in the json data
-	 */
-	private static class BinData {
-		
-		// Unique ID of the Bin
-		public int binID;
-		
-		// ID of the TriBin that this Bin belongs to
-		public int triBinID;
-		
-		// Type of waste collected by the bin
-		public String binType;
-		
-		// Current amount of waste in the bin measured by height
-		public double wasteHeight;
-	}
 }
