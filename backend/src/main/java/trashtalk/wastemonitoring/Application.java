@@ -11,6 +11,8 @@ import main.java.trashtalk.wastemonitoring.controller.TriBinController;
 import main.java.trashtalk.wastemonitoring.controller.HistoryController;
 import main.java.trashtalk.wastemonitoring.controller.PickupController;
 import main.java.trashtalk.wastemonitoring.service.HistoryService;
+import main.java.trashtalk.wastemonitoring.controller.LoginController;
+import main.java.trashtalk.wastemonitoring.service.LoginService;
 
 public class Application {
 
@@ -48,10 +50,20 @@ public class Application {
 					new HistoryController(historyService)
 			);
 
+
+			// Shared login service used by the login endpoint.
+			LoginService loginService = new LoginService();
+
 			// Connect /api/pickups to the PickupController
 			server.createContext(
 					"/api/pickups",
-					new PickupController()
+					new PickupController(loginService)
+			);
+
+            // Handles staff login requests.
+			server.createContext(
+					"/api/login",
+					new LoginController(loginService)
 			);
 
 			// Start the server
