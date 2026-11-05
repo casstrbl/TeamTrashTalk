@@ -15,9 +15,10 @@ public class Bin {
 												entire tribin structure, not just the actual trash bin itself. The current value for BIN_HEIGHT is
 												temporary until we get a measurement of the stand-alone bin for accurate sensor readings.*/
 	// Bin information
-	private int binID;			// Unique ID of the Bin
-	private int triBinID;		// ID of the TriBin the Bin belongs to
-	private	BinType binType;	// Type of waste collected by the Bin
+	private int binID;								// Unique ID of the Bin
+	private int triBinID;							// ID of the TriBin the Bin belongs to
+	private	BinType binType;						// Type of waste collected by the Bin
+	private BinStatus status = BinStatus.GREEN;		// Bin's fullness status
 	
 	// Waste level information
 	private double wasteHeight;
@@ -75,6 +76,12 @@ public class Bin {
 		return binType;
 	}
 	
+	/**
+	 * Retrieves the bin's fill status
+	 */
+	public BinStatus getStatus() {
+		return status;
+	}
 	
 	/**
 	 * Sets the waste height according to the sensor reading
@@ -107,10 +114,18 @@ public class Bin {
 	
 	
 	/**
-	 * Sets the bin's waste stream
+	 * Sets the bin's fill status
 	 */
-	public void setBinType() {
-		this.binType = binType;
+	public void setStatus(BinStatus status) {
+		this.status = status;
+	}
+	
+	
+	/**
+	 * Checks bin's status to determine if it's full.
+	 */
+	public boolean isFull() {
+		return getStatus() == BinStatus.RED;
 	}
 	
 	

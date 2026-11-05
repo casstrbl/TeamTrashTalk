@@ -31,5 +31,12 @@ public class BinService {
 		else
 			return Bin.BinStatus.RED;		//If the Bin is 80% or greater, its status is RED.
 	}
-
+	
+	
+	/**
+	 * Sets the status within the bin object.
+	 */
+	public void setStatus(Bin b) {
+		b.setStatus(getStatus(b));
+	}
 }

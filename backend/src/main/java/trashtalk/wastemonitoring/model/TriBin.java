@@ -3,6 +3,14 @@ package main.java.trashtalk.wastemonitoring.model;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/**
+ * Represents a tribin in the waste monitoring system.
+ *
+ * A TriBin stores its identification, list of bins within the tribin structure, zone, location, and GPS coordinates.
+ * 
+ * Bins can belong to one of three waste streams: landfill, recycling,
+ * or compost.
+ */
 public class TriBin {
 
 	// Bin information
