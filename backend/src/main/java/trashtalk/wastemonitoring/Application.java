@@ -50,14 +50,15 @@ public class Application {
 					new HistoryController(historyService)
 			);
 
-			// Connect /api/pickups to the PickupController
-			server.createContext(
-					"/api/pickups",
-					new PickupController()
-			);
 
 			// Shared login service used by the login endpoint.
 			LoginService loginService = new LoginService();
+
+			// Connect /api/pickups to the PickupController
+			server.createContext(
+					"/api/pickups",
+					new PickupController(loginService)
+			);
 
             // Handles staff login requests.
 			server.createContext(
