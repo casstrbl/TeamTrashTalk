@@ -196,7 +196,118 @@ public class BinRepository {
 
 
 	// a blank zone comes back as the empty char
-	private static char toZone(String zone) {
+
+    /**
+     * Finds bins whose sensors have stopped reporting.
+     * Only checks bins belonging to online TriBin stations.
+     */
+    public List<Integer> findBinsWithMissingReadings(
+            long thresholdHours,
+            java.time.LocalDateTime now) {
+
+        String sql = """
+                SELECT b.binID, MAX(h.readingTime) AS latest
+                FROM bins b
+                JOIN triBins t ON b.triBinID = t.triBinID
+                LEFT JOIN sensor_history h ON b.binID = h.binID
+                WHERE LOWER(t.sensorStatus) = 'online'
+                GROUP BY b.binID
+                """;
+
+        List<Integer> failedBinIDs = new ArrayList<>();
+
+        var failureService =
+                new main.java.trashtalk.wastemonitoring.service.SensorFailureService();
+
+        try (Connection connection = DatabaseConfig.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet rows = statement.executeQuery()) {
+
+            while (rows.next()) {
+                Timestamp latest = rows.getTimestamp("latest");
+
+                java.time.LocalDateTime lastReading =
+                        latest == null ? null : latest.toLocalDateTime();
+
+                if (failureService.hasMissingReadingForHours(
+                        lastReading, thresholdHours, now)) {
+
+                    failedBinIDs.add(rows.getInt("binID"));
+                }
+            }
+
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "Could not check missing sensor readings", e);
+        }
+
+        return failedBinIDs;
+    }
+
+    /**
+     * Updates each online station's individual sensor statuses
+     * based on the latest recorded reading.
+     */
+    public int refreshSensorFailureStatuses(
+            long thresholdHours,
+            java.time.LocalDateTime now) {
+
+        if (thresholdHours <= 0 || now == null) {
+            throw new IllegalArgumentException(
+                    "Valid threshold and current time are required");
+        }
+
+        String sql = """
+                SELECT b.binID, MAX(h.readingTime) AS latest
+                FROM bins b
+                JOIN triBins t ON b.triBinID = t.triBinID
+                LEFT JOIN sensor_history h ON b.binID = h.binID
+                WHERE LOWER(t.sensorStatus) = 'online'
+                GROUP BY b.binID
+                """;
+
+        String updateSql =
+                "UPDATE bins SET sensorStatus = ? WHERE binID = ?";
+
+        int failedCount = 0;
+
+        var checker =
+                new main.java.trashtalk.wastemonitoring.service.SensorFailureService();
+
+        try (Connection connection = DatabaseConfig.getConnection();
+             PreparedStatement query = connection.prepareStatement(sql);
+             PreparedStatement update = connection.prepareStatement(updateSql);
+             ResultSet rows = query.executeQuery()) {
+
+            while (rows.next()) {
+                Timestamp latest = rows.getTimestamp("latest");
+
+                java.time.LocalDateTime lastReading =
+                        latest == null ? null : latest.toLocalDateTime();
+
+                boolean failed = checker.hasMissingReadingForHours(
+                        lastReading, thresholdHours, now);
+
+                update.setString(1, failed ? "failed" : "online");
+                update.setInt(2, rows.getInt("binID"));
+                update.addBatch();
+
+                if (failed) {
+                    failedCount++;
+                }
+            }
+
+            update.executeBatch();
+
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "Could not update sensor failure statuses", e);
+        }
+
+        return failedCount;
+    }
+
+    private static char toZone(String zone) {
 		if (zone == null || zone.isBlank()) {
 			return '\0';
 		}
