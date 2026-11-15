@@ -13,6 +13,10 @@ Smart campus waste bin monitoring system for the Sac State sustainability office
 
 ## Run the backend
 
+**Shortcut (Mac/Linux, needs a JDK):** run `pnpm dev:all` from the project folder. It builds and starts the backend with fake sensors on (local H2 only, never Supabase), then starts the website. Ctrl + C stops both. The backend's output goes to `backend/out/backend.log`.
+
+The fake sensors fill each compartment at its own pace (landfill fastest, compost slowest), busy spots fill faster, readings wobble a little like a real sensor, and full bins get emptied after a while. `SIM_SPEED` sets how much faster than real life it runs (default 60, so one real minute is one hour). Use `SIM_SPEED=30 pnpm dev:all` for slower, or `pnpm dev:all --fresh` to start the bins over from the seed data.
+
 You need a JDK and either VS Code (with Extension Pack for Java) or Eclipse.
 
 1. Set `backend/src` as the source folder, since the packages start with `main.java...`. In VS Code, run `Java: Configure Classpath`, open the Sources tab and add `backend/src`.
@@ -43,6 +47,14 @@ If the backend isn't running, the site falls back to the sample bins in `src/dat
 - Never commit `backend/db.properties` or `.env`. Both are in `.gitignore`.
 - The GitHub Pages site only hosts the website, so it shows the sample bins.
 - The tests in `backend/src/test` need JUnit, which isn't in `backend/lib` yet.
+
+## Glass redesign (from the Figma mockups)
+
+- **Login:** a welcome screen with Log in and Create account. It's a demo sign-in for now: any password works for an email on the staff list (person1@csus.edu is an editor, person2 and person3 are viewers). New accounts start as viewers with no zones, until an editor adds them to one.
+- **Pickup List:** bins at the alert level or higher, fullest first. Tapping "Emptied" saves who did it and when, with Undo and a CSV export.
+- **History:** type a bin number or place in the box at the top, or open it and pick a bin. "All bins" shows the overview. The readings table can be exported as a CSV.
+- **Settings (gear tab):** everyone can turn each kind of alert on or off for themselves and change the full and low-battery levels. Editors also see Staff & Zones there.
+- Sign-ins, new accounts, pickups and alert settings are saved in the browser only, so they don't sync between devices yet. They need backend endpoints (login, pickups, settings) before the real launch.
 
 ## Sprint 3: Fake sensor timer (Waiss)
 

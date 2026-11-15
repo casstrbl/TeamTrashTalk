@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap');
 @import 'tailwindcss';
 
 /* desktop layout (sidebar, 4-column summary): wide AND landscape. width alone isn't enough:
@@ -6,9 +6,10 @@
 @custom-variant desk (@media (min-width: 1024px) and (orientation: landscape));
 
 @theme inline {
-  --font-display: 'Outfit', system-ui, sans-serif;
-  --font-sans: 'Outfit', system-ui, sans-serif;
-  --font-mono: 'DM Mono', 'Courier New', monospace;
+  /* quicksand everywhere: rounded ends to match the soft glass look. numbers use tabular figures (below) */
+  --font-display: 'Quicksand', system-ui, sans-serif;
+  --font-sans: 'Quicksand', system-ui, sans-serif;
+  --font-mono: 'Quicksand', system-ui, sans-serif;
 
   /* palette */
   --color-pine: #0F2E23; /* nav, headlines, hero tile, primary buttons */
@@ -17,6 +18,8 @@
   --color-teal: #1B5B65; /* info, links, map, selected states */
   --color-olive: #798F53; /* calm, "all good"; too light for text */
   --color-rose: #C88582; /* only for things that need attention; too light for text */
+  --color-lime: #D3EDA1; /* login screen only: the headline word and the log in button */
+  --color-night: #08180F; /* login screen background */
   /* soft tints and text shades for the summary tiles (from the mockups) */
   --color-teal-soft: #DCE8E9; /* info tiles */
   --color-olive-soft: #E3EAD6; /* calm tiles, "good" pill */
@@ -27,9 +30,21 @@
   --color-warn-soft: #F3E3BF;
   --color-offline-soft: #E6E4DA;
 
-  /* quick fade when switching pages (fade only: a slide would move the map while it measures itself) */
-  --animate-page-in: page-in 180ms ease-out;
+  /* soft dissolve when a page or screen changes: it fades in out of a slight blur. no slide,
+     since a slide would move the map while it measures itself */
+  --animate-page-in: page-in 420ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
   @keyframes page-in {
+    from { opacity: 0; filter: blur(6px); }
+    to { opacity: 1; filter: none; }
+  }
+  /* popups and menus: fade in and grow a touch */
+  --animate-pop-in: pop-in 260ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  @keyframes pop-in {
+    from { opacity: 0; scale: 0.96; }
+    to { opacity: 1; scale: 1; }
+  }
+  --animate-fade-in: fade-in 240ms ease-out both;
+  @keyframes fade-in {
     from { opacity: 0; }
     to { opacity: 1; }
   }
@@ -54,6 +69,110 @@
   --color-status-critical-ink: #8E332D;
   --color-status-offline-ink: #5F5F55;
 }
+
+/* frosted glass tiles. the page behind them is a soft, fixed gradient, so blurring it changes
+   nothing you can see: plain see-through white gives the same look and keeps scrolling smooth
+   on the ipad. the real blur is only on things content scrolls under (nav, top pills, popups) */
+@utility glass {
+  background-color: rgb(255 255 255 / 0.55);
+  border: 1px solid rgb(255 255 255 / 0.9);
+  box-shadow: 0 8px 24px rgb(15 46 35 / 0.06);
+}
+@utility glass-blur {
+  background-color: rgb(255 255 255 / 0.62);
+  border: 1px solid rgb(255 255 255 / 0.9);
+  box-shadow: 0 8px 24px rgb(15 46 35 / 0.08);
+  -webkit-backdrop-filter: blur(24px) saturate(1.3);
+  backdrop-filter: blur(24px) saturate(1.3);
+}
+/* dark pine glass: the fullest-bin tile, the tab bar */
+@utility glass-dark {
+  background-color: rgb(15 46 35 / 0.9);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  box-shadow: 0 16px 36px rgb(15 46 35 / 0.22);
+  -webkit-backdrop-filter: blur(24px) saturate(1.3);
+  backdrop-filter: blur(24px) saturate(1.3);
+}
+/* colored glass: a see-through tint laid over the white glass (background-image, so it never
+   fights the glass utility's background-color) */
+@utility tint-rose { background-image: linear-gradient(rgb(200 133 130 / 0.2), rgb(200 133 130 / 0.2)); }
+@utility tint-olive { background-image: linear-gradient(rgb(227 234 214 / 0.7), rgb(227 234 214 / 0.7)); }
+@utility tint-teal { background-image: linear-gradient(rgb(220 232 233 / 0.75), rgb(220 232 233 / 0.75)); }
+
+/* see-through white on the dark login screen */
+@utility glass-night {
+  background-color: rgb(255 255 255 / 0.1);
+  border: 1px solid rgb(255 255 255 / 0.2);
+  -webkit-backdrop-filter: blur(30px);
+  backdrop-filter: blur(30px);
+}
+
+/* the soft color glows behind every page (see Aura.tsx). fixed, so the tiles scroll over them.
+   each glow is a big soft circle drifting on its own slow loop, so the colors keep shifting
+   without ever moving fast. transform-only animation, so it stays smooth on the ipad */
+.aura {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background-color: #F4F1DE;
+}
+.aura > span {
+  position: absolute;
+  width: 70vmax;
+  height: 70vmax;
+  border-radius: 50%;
+  will-change: transform;
+  animation: aura-drift-a 28s ease-in-out infinite alternate;
+}
+/* olive, top left */
+.aura > span:nth-child(1) { left: -22vmax; top: -26vmax; background: radial-gradient(circle, rgb(121 143 83 / 0.55), transparent 65%); }
+/* teal, right */
+.aura > span:nth-child(2) { right: -28vmax; top: 8vh; background: radial-gradient(circle, rgb(27 91 101 / 0.34), transparent 65%); animation-name: aura-drift-b; animation-duration: 34s; }
+/* rose, bottom left */
+.aura > span:nth-child(3) { left: -24vmax; bottom: -28vmax; background: radial-gradient(circle, rgb(200 133 130 / 0.5), transparent 65%); animation-name: aura-drift-c; animation-duration: 31s; }
+/* olive, bottom right */
+.aura > span:nth-child(4) { right: -24vmax; bottom: -32vmax; background: radial-gradient(circle, rgb(121 143 83 / 0.42), transparent 65%); animation-name: aura-drift-b; animation-duration: 38s; animation-direction: alternate-reverse; }
+/* a smaller rose glow that wanders through the middle */
+.aura > span:nth-child(5) { width: 50vmax; height: 50vmax; left: 30vw; top: 30vh; background: radial-gradient(circle, rgb(200 133 130 / 0.28), transparent 65%); animation-name: aura-drift-c; animation-duration: 44s; animation-direction: alternate-reverse; }
+
+/* the login screen: the same drift on night pine, with lime, olive and teal glows */
+.aura-night { background-color: #08180F; }
+.aura-night > span:nth-child(1) { left: auto; right: -26vmax; top: -34vmax; width: 60vmax; height: 60vmax; background: radial-gradient(circle, rgb(211 237 161 / 0.5), transparent 65%); }
+.aura-night > span:nth-child(2) { left: -30vmax; right: auto; top: 18vh; background: radial-gradient(circle, rgb(121 143 83 / 0.75), transparent 65%); }
+.aura-night > span:nth-child(3) { left: auto; right: -26vmax; bottom: -30vmax; background: radial-gradient(circle, rgb(27 91 101 / 0.85), transparent 65%); }
+.aura-night > span:nth-child(4) { right: auto; left: -20vmax; bottom: -40vmax; background: radial-gradient(circle, rgb(27 91 101 / 0.5), transparent 65%); }
+.aura-night > span:nth-child(5) { background: radial-gradient(circle, rgb(211 237 161 / 0.14), transparent 65%); }
+/* darker toward the bottom so the buttons read clearly */
+.aura-night::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, transparent 45%, rgb(8 24 15 / 0.65));
+}
+
+@keyframes aura-drift-a {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(12vmax, 8vmax, 0) scale(1.12); }
+  100% { transform: translate3d(4vmax, 16vmax, 0) scale(0.94); }
+}
+@keyframes aura-drift-b {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(-14vmax, 10vmax, 0) scale(0.92); }
+  100% { transform: translate3d(-6vmax, -8vmax, 0) scale(1.1); }
+}
+@keyframes aura-drift-c {
+  0% { transform: translate3d(0, 0, 0) scale(1.05); }
+  50% { transform: translate3d(14vmax, -10vmax, 0) scale(0.95); }
+  100% { transform: translate3d(22vmax, -2vmax, 0) scale(1.12); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .aura > span { animation: none; }
+}
+
+/* numbers line up in columns */
+.font-mono, .tabular-nums { font-variant-numeric: tabular-nums; }
 
 * {
   scrollbar-width: thin;
@@ -81,4 +200,18 @@ body {
   font-family: var(--font-sans);
   background-color: #F4F1DE;
   color: #0F2E23;
+}
+
+/* every button, link and menu eases between its looks (hover, picked, pressed) instead of
+   snapping, and sinks slightly while pressed. left outside tailwind's layers on purpose, so it
+   applies to every button in the app, whatever transition class it has */
+button, select, a, [role='button'] {
+  transition-property: color, background-color, border-color, box-shadow, opacity, filter, scale, translate;
+  transition-duration: 240ms;
+  transition-timing-function: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+button:not(:disabled):active, select:active { scale: 0.97; }
+[role='button']:active { scale: 0.985; }
+@media (prefers-reduced-motion: reduce) {
+  button:not(:disabled):active, select:active, [role='button']:active { scale: none; }
 }
