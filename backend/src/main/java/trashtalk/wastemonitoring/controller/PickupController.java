@@ -67,6 +67,12 @@ public class PickupController implements HttpHandler {
                 "Content-Type, Authorization"
         );
 
+        // Handle browser CORS checks.
+        if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
+            exchange.sendResponseHeaders(204, -1);
+            return;
+        }
+
         // Handle completed pickup requests.
         if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
             handleCompletedPickup(exchange);
@@ -178,6 +184,17 @@ public class PickupController implements HttpHandler {
             return;
         }
 
+        // A missing triBinID is read as 0, so reject it here
+        // instead of letting the database insert fail.
+        if (request == null || request.triBinID() <= 0) {
+            sendResponse(
+                    exchange,
+                    400,
+                    "{\"error\":\"A valid triBinID is required\"}"
+            );
+            return;
+        }
+
         // Get the login token from the request.
         String authorization =
                 exchange.getRequestHeaders().getFirst("Authorization");
@@ -226,7 +243,27 @@ public class PickupController implements HttpHandler {
                     staff.id(),
                     LocalDateTime.now()
             );
-        } catch (Exception e) {
+        } catch (java.sql.SQLException e) {
+
+            // 23503 is the foreign key error code in both H2 and PostgreSQL,
+            // which means the TriBin ID doesn't exist.
+            if ("23503".equals(e.getSQLState())) {
+                sendResponse(
+                        exchange,
+                        404,
+                        "{\"error\":\"TriBin not found\"}"
+                );
+                return;
+            }
+
+            sendResponse(
+                    exchange,
+                    500,
+                    "{\"error\":\"Unable to save completed pickup\"}"
+            );
+            return;
+
+        } catch (RuntimeException e) {
             sendResponse(
                     exchange,
                     500,
