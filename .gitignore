@@ -19,3 +19,5 @@ backend/out/
 
 # Local JUnit test runner
 backend/lib/junit-platform-console-standalone-*.jar
+# Vite build output
+dist/
