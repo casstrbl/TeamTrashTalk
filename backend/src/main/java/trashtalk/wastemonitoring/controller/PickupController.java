@@ -245,9 +245,10 @@ public class PickupController implements HttpHandler {
             );
         } catch (java.sql.SQLException e) {
 
-            // 23503 is the foreign key error code in both H2 and PostgreSQL,
-            // which means the TriBin ID doesn't exist.
-            if ("23503".equals(e.getSQLState())) {
+            // A foreign key error means the TriBin ID doesn't exist.
+            // PostgreSQL uses code 23503 for this and H2 uses 23506.
+            if ("23503".equals(e.getSQLState())
+                    || "23506".equals(e.getSQLState())) {
                 sendResponse(
                         exchange,
                         404,
