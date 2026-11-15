@@ -140,6 +140,8 @@ public class DatabaseInitializer {
 				// Execute the SQL statement to create the tri-bins table
 					triBinStatement.execute();
 
+                // Add individual sensor status for existing and new databases.
+
 				// Execute the SQL statement to create the bins table
 					binStatement.execute();
 
@@ -162,6 +164,13 @@ public class DatabaseInitializer {
 				    }
 			    }
 				
+                // Each bin can be marked online or failed independently.
+                try (Statement statusStatement =
+                        connection.createStatement()) {
+                    statusStatement.execute(
+                        "ALTER TABLE bins ADD COLUMN IF NOT EXISTS sensorStatus VARCHAR(10) NOT NULL DEFAULT 'online'"
+                    );
+                }
 				// make sure older databases have the  sensor columns
 				try (Statement alterStatement = connection.createStatement()) {
 				    for (String sql : addSensorColumns) {
