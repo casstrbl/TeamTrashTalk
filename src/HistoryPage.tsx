@@ -62,6 +62,30 @@ interface HistoryBin {
   id: string
   name: string
   zone: string
+  location: string
+  compartments: { label: Stream; fill: number }[]
+  sensorStatus: 'online' | 'offline'
+}
+
+type Group = Status | 'offline'
+
+// groups on the overview, most urgent first
+const GROUPS: { key: Group; title: string }[] = [
+  { key: 'critical', title: 'Needs pickup' },
+  { key: 'warn', title: 'Getting full' },
+  { key: 'offline', title: 'Offline' },
+  { key: 'ok', title: 'All good' },
+]
+
+const GROUP_DOT: Record<Group, string> = { ...STATUS_DOT, offline: 'bg-status-offline' }
+
+function fullest(bin: HistoryBin) {
+  return Math.max(0, ...bin.compartments.map(c => c.fill))
+}
+
+// same rule as the dashboard: the fullest compartment decides, offline wins
+function groupOf(bin: HistoryBin): Group {
+  return bin.sensorStatus === 'offline' ? 'offline' : statusOf(fullest(bin))
 }
 
 // bin ids end in 01 / 02 / 03 for landfill / recycling / compost
@@ -194,6 +218,97 @@ function Sparkline({ points, color }: { points: Point[]; color: string }) {
   )
 }
 
+// campus average per compartment, from the bins that are online
+function Overview({ bins }: { bins: HistoryBin[] }) {
+  const online = bins.filter(b => b.sensorStatus === 'online')
+  return (
+    <div className="grid grid-cols-3 gap-3 desk:gap-4">
+      {STREAMS.map(s => {
+        const fills = online.map(b => b.compartments.find(c => c.label === s)?.fill).filter((f): f is number => f !== undefined)
+        const avg = fills.length ? Math.round(fills.reduce((a, b) => a + b, 0) / fills.length) : null
+        const full = fills.filter(f => f >= CRITICAL_AT).length
+        return (
+          <div key={s} className="rounded-3xl p-3 sm:p-5 bg-white">
+            <span className="flex items-center gap-1.5 text-xs sm:text-sm font-medium text-pine">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: STREAM_COLOR[s] }} />
+              {s}
+            </span>
+            <p className="flex items-baseline gap-1 mt-2 sm:mt-3">
+              <span className="text-2xl sm:text-4xl font-semibold text-pine tabular-nums">{avg ?? '–'}</span>
+              <span className="text-xs text-pine-muted">% avg</span>
+            </p>
+            <div className="h-1.5 rounded-full bg-ivory mt-2 sm:mt-3 overflow-hidden">
+              <div className="h-full rounded-full" style={{ width: `${avg ?? 0}%`, backgroundColor: STREAM_COLOR[s] }} />
+            </div>
+            <p className={`text-[11px] sm:text-xs mt-2 ${full ? 'text-status-critical-ink font-semibold' : 'text-pine-muted'}`}>
+              {full ? `${full} full` : 'None full'}
+            </p>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// three little fill bars, one per compartment
+function MiniBars({ bin }: { bin: HistoryBin }) {
+  const offline = bin.sensorStatus === 'offline'
+  return (
+    <div className="flex items-end gap-2.5 shrink-0">
+      {STREAMS.map(s => {
+        const fill = bin.compartments.find(c => c.label === s)?.fill ?? 0
+        return (
+          <div key={s} className="flex flex-col items-center gap-1" title={`${s} ${Math.round(fill)}%`}>
+            <div className="w-2 h-8 rounded-full bg-ivory overflow-hidden flex items-end">
+              <div className={`w-full rounded-full ${offline ? 'bg-status-offline' : STATUS_DOT[statusOf(fill)]}`} style={{ height: `${Math.min(100, fill)}%` }} />
+            </div>
+            <span className="text-[10px] text-pine-muted tabular-nums leading-none">{Math.round(fill)}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// every bin, sorted into status groups, tap one to see its history
+function BinGroups({ bins, onPick }: { bins: HistoryBin[]; onPick: (id: string) => void }) {
+  return (
+    <div className="grid gap-5 desk:gap-6">
+      {GROUPS.map(g => {
+        const list = bins.filter(b => groupOf(b) === g.key).sort((a, b) => fullest(b) - fullest(a))
+        if (list.length === 0) return null
+        return (
+          <section key={g.key}>
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-pine mb-2 px-1">
+              <span className={`w-2 h-2 rounded-full ${GROUP_DOT[g.key]}`} />
+              {g.title}
+              <span className="text-pine-muted font-normal">{list.length}</span>
+            </h2>
+            <div className="grid gap-2 md:grid-cols-2">
+              {list.map(b => (
+                <button
+                  key={b.id}
+                  onClick={() => onPick(b.id)}
+                  className="flex items-center justify-between gap-3 bg-white rounded-2xl pl-4 pr-3 py-3 text-left hover:bg-white/70 transition-colors"
+                >
+                  <span className="min-w-0">
+                    <span className="block font-semibold text-pine truncate">{b.name}</span>
+                    <span className="block text-xs text-pine-muted truncate">{b.location} · {b.zone}</span>
+                  </span>
+                  <span className="flex items-center gap-3">
+                    <MiniBars bin={b} />
+                    <svg viewBox="0 0 24 24" className="w-4 h-4 text-pine-muted" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )
+      })}
+    </div>
+  )
+}
+
 const PAD = { l: 36, r: 18, t: 40, b: 30 }
 
 function FillChart({ points, color, label, hoverT, onHover }: {
@@ -313,15 +428,15 @@ function FillChart({ points, color, label, hoverT, onHover }: {
 }
 
 export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; sampleData: boolean }) {
-  const [binId, setBinId] = useState<string>(bins[0]?.id ?? '')
+  const [binId, setBinId] = useState<string | null>(null) // null = the overview
   const [stream, setStream] = useState<Stream>('Landfill')
   const [range, setRange] = useState<RangeKey>('10m')
   const [series, setSeries] = useState<Record<Stream, Point[]> | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [hoverT, setHoverT] = useState<number | null>(null)
 
-  // if the picked bin isn't in the list any more (zone change), fall back to the first
-  const bin = bins.find(b => b.id === binId) ?? bins[0]
+  // if the picked bin isn't in the list any more (zone change), go back to the overview
+  const bin = bins.find(b => b.id === binId)
   const activeId = bin?.id
 
   useEffect(() => {
@@ -372,11 +487,27 @@ export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; 
   const points = windowed[shown]
   const drawn = useMemo(() => downsample(points, MAX_DRAWN), [points])
 
-  if (bins.length === 0 || !bin) {
+  if (bins.length === 0) {
     return (
       <>
         <h1 className="text-3xl lg:text-4xl font-semibold text-pine">History</h1>
         <Message title="No bins to show" text="Once you have a zone with bins, their fill history will show up here." />
+      </>
+    )
+  }
+
+  function openBin(id: string) {
+    setBinId(id)
+    setHoverT(null)
+    window.scrollTo({ top: 0 })
+  }
+
+  if (!bin) {
+    return (
+      <>
+        <h1 className="text-3xl lg:text-4xl font-semibold text-pine">History</h1>
+        <Overview bins={bins} />
+        <BinGroups bins={bins} onPick={openBin} />
       </>
     )
   }
@@ -401,29 +532,26 @@ export default function HistoryPage({ bins, sampleData }: { bins: HistoryBin[]; 
 
   return (
     <>
-      {/* title and bin picker */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-3xl lg:text-4xl font-semibold text-pine">History</h1>
+      {/* back to the overview, then the bin's name */}
+      <div>
+        <button
+          onClick={() => { setBinId(null); setHoverT(null) }}
+          className="inline-flex items-center gap-1 bg-white rounded-full pl-2.5 pr-4 min-h-10 text-sm font-medium text-pine hover:bg-white/70 transition-colors"
+        >
+          <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6" /></svg>
+          All bins
+        </button>
+        <h1 className="text-3xl lg:text-4xl font-semibold text-pine mt-3">{bin.name}</h1>
+        <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-pine-muted mt-1">
+          <span>{bin.location} · {bin.zone}</span>
           {!sampleData && (
-            <p className="flex items-center gap-1.5 text-xs text-pine-muted mt-1">
+            <>
+              <span aria-hidden="true">·</span>
               <span className={`w-1.5 h-1.5 rounded-full ${status === 'error' ? 'bg-status-critical' : 'bg-status-ok'}`} />
-              {status === 'error' ? 'Can’t reach the backend, showing the last readings we had' : `Live, updates every ${REFRESH_MS / 1000} seconds`}
-            </p>
+              <span>{status === 'error' ? 'Can’t reach the backend, showing the last readings we had' : `Live, updates every ${REFRESH_MS / 1000} seconds`}</span>
+            </>
           )}
-        </div>
-        <label className="flex items-center gap-2 bg-white rounded-full pl-4 pr-3 min-h-11 text-sm">
-          <span className="text-pine-muted">Bin</span>
-          <select
-            value={bin.id}
-            onChange={e => { setBinId(e.target.value); setHoverT(null) }}
-            className="bg-transparent font-semibold text-pine outline-none cursor-pointer"
-          >
-            {bins.map(b => (
-              <option key={b.id} value={b.id}>{b.name} · {b.zone}</option>
-            ))}
-          </select>
-        </label>
+        </p>
       </div>
 
       {sampleData ? (
