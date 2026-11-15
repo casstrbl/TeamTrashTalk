@@ -15,7 +15,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-
+import main.java.trashtalk.wastemonitoring.service.LoginService;
+import main.java.trashtalk.wastemonitoring.repository.PickupRepository;
+import java.time.LocalDateTime;
 /**
  * Handles GET /api/pickups requests.
  *
@@ -32,6 +34,20 @@ public class PickupController implements HttpHandler {
     private final BinService binService = new BinService();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    // Handles saving completed pickups.
+    private final PickupRepository pickupRepository =
+            new PickupRepository();
+
+    // Checks the logged-in staff member and their role.
+    private final LoginService loginService;
+
+    private record PickupRequest(int triBinID) {
+    }
+
+    public PickupController(LoginService loginService) {
+        this.loginService = loginService;
+    }
+
     @Override
     public void handle(HttpExchange exchange) throws IOException {
 
@@ -43,21 +59,21 @@ public class PickupController implements HttpHandler {
 
         exchange.getResponseHeaders().set(
                 "Access-Control-Allow-Methods",
-                "GET, OPTIONS"
+                "GET, POST, OPTIONS"
         );
 
         exchange.getResponseHeaders().set(
                 "Access-Control-Allow-Headers",
-                "Content-Type"
+                "Content-Type, Authorization"
         );
 
-        // Handle browser CORS checks.
-        if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
-            exchange.sendResponseHeaders(204, -1);
+        // Handle completed pickup requests.
+        if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            handleCompletedPickup(exchange);
             return;
         }
 
-        // Only GET requests are supported.
+        // Only GET and POST requests are supported.
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
             sendResponse(
                     exchange,
@@ -113,14 +129,12 @@ public class PickupController implements HttpHandler {
             );
 
         } catch (Exception e) {
-
-            e.printStackTrace();
-
             sendResponse(
                     exchange,
                     500,
                     "{\"error\":\"Unable to load pickup list\"}"
             );
+            return;
         }
     }
 
@@ -141,6 +155,92 @@ public class PickupController implements HttpHandler {
         }
 
         return highestFill;
+    }
+
+    // Read the TriBin ID sent by the frontend.
+    private void handleCompletedPickup(
+            HttpExchange exchange) throws IOException {
+
+        // Read the TriBin ID sent by the frontend.
+        PickupRequest request;
+
+        try {
+            request = objectMapper.readValue(
+                    exchange.getRequestBody(),
+                    PickupRequest.class
+            );
+        } catch (Exception e) {
+            sendResponse(
+                    exchange,
+                    400,
+                    "{\"error\":\"Invalid request body\"}"
+            );
+            return;
+        }
+
+        // Get the login token from the request.
+        String authorization =
+                exchange.getRequestHeaders().getFirst("Authorization");
+
+        if (authorization == null
+                || !authorization.startsWith("Bearer ")) {
+
+            sendResponse(
+                    exchange,
+                    401,
+                    "{\"error\":\"Login required\"}"
+            );
+            return;
+        }
+
+        String token =
+                authorization.substring("Bearer ".length());
+
+        // Make sure the logged-in staff member is an editor.
+        LoginService.Profile staff;
+
+        try {
+            staff = loginService.editorForToken(token);
+        } catch (Exception e) {
+            sendResponse(
+                    exchange,
+                    500,
+                    "{\"error\":\"Unable to verify login\"}"
+            );
+            return;
+        }
+
+        if (staff == null) {
+            sendResponse(
+                    exchange,
+                    403,
+                    "{\"error\":\"Editor access required\"}"
+            );
+            return;
+        }
+
+        // Save the completed pickup with the logged-in staff member.
+        try {
+            pickupRepository.saveCompletedPickup(
+                    request.triBinID(),
+                    staff.id(),
+                    LocalDateTime.now()
+            );
+        } catch (Exception e) {
+            sendResponse(
+                    exchange,
+                    500,
+                    "{\"error\":\"Unable to save completed pickup\"}"
+            );
+            return;
+        }
+
+        // Tell the frontend the pickup was saved successfully.
+        sendResponse(
+                exchange,
+                200,
+                "{\"message\":\"Pickup marked complete\"}"
+        );
     }
 
     /**
