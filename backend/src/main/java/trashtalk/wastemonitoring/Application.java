@@ -14,6 +14,7 @@ import main.java.trashtalk.wastemonitoring.database.DatabaseViewer;
 import main.java.trashtalk.wastemonitoring.service.HistoryCsvService;
 import main.java.trashtalk.wastemonitoring.service.HistoryService;
 import main.java.trashtalk.wastemonitoring.service.LoginService;
+import main.java.trashtalk.wastemonitoring.controller.TriBinManagementController;
 
 public class Application {
 
@@ -69,6 +70,12 @@ public class Application {
 			server.createContext(
 					"/api/system-check",
 					new SystemCheckController(loginService)
+			);
+
+			// Connect editor-only TriBin management endpoints.
+			server.createContext(
+					"/api/admin/tribins",
+					new TriBinManagementController(loginService)
 			);
 
 			// Start the server
