@@ -1,6 +1,9 @@
 package main.java.trashtalk.wastemonitoring.database;
 
 import java.io.InputStream;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -17,33 +20,31 @@ public class BinDataLoader {
 	 * Loads TriBin data from the tribins.json file
 	 */
 	public static List<TriBin> loadTriBins() {
-		
-		// Open tribins.json from the resources folder
-		try (InputStream inputStream =
-			BinDataLoader.class
-				.getClassLoader()
-				.getResourceAsStream("tribins.json")) {
-					
+
+		// Prefer the packaged classpath resource, then fall back to the source-tree
+		// location used by the team's unmanaged VS Code Java project.
+		try (InputStream inputStream = openTriBins()) {
+
 			// Check that tribin.json is found
 			if (inputStream == null) {
 				throw new RuntimeException("tribins.json could not be found.");
 			}
-			
+
 			// Create an ObjectMapper to read and convert the json data in Java objects
 			ObjectMapper objectMapper = new ObjectMapper();
-			
+
 			// Read tribins.json and convert it into a list of TriBinData objects
 			List<TriBinData> triBinData = objectMapper.readValue(
 					inputStream,
 					new TypeReference<List<TriBinData>>() {}
 					);
-			
+
 			// Create a list to store the completed TriBin objects
 			List<TriBin> triBins = new ArrayList<>();
-			
+
 			// Convert each TriBinData object into a TriBin object
 			for (TriBinData data : triBinData) {
-				
+
 				// Create a TriBin using the data loaded from the json file
 				TriBin triBin = new TriBin(
 						data.triBinID,
@@ -57,17 +58,19 @@ public class BinDataLoader {
 				// simulated sensor info until real sensors are hooked up
 				triBin.setBattery(data.battery);
 				triBin.setSensorStatus(data.sensorStatus);
-				triBin.setLastUpdated(LocalDateTime.now().minusMinutes(data.lastUpdatedMinutesAgo));
+				if (data.lastUpdatedMinutesAgo != null) {
+					triBin.setLastUpdated(LocalDateTime.now().minusMinutes(data.lastUpdatedMinutesAgo));
+				}
 
 				// Add the completed TriBin to the list
 				triBins.add(triBin);
 			}
-			
+
 			// Return the list of TriBin objects
 			return triBins;
-			
+
 		} catch (Exception e) {
-			
+
 			// Handle errors that occur while loading or converting the json data
 			throw new RuntimeException(
 					"Error loading tribin.json",
@@ -75,28 +78,41 @@ public class BinDataLoader {
 				);
 		}
 	}
-	
+
+	private static InputStream openTriBins() throws IOException {
+		InputStream classpathResource = BinDataLoader.class
+				.getClassLoader()
+				.getResourceAsStream("tribins.json");
+		if (classpathResource != null) return classpathResource;
+
+		Path sourceTreeResource = Path.of("backend", "src", "main", "resources", "tribins.json");
+		if (Files.isRegularFile(sourceTreeResource)) {
+			return Files.newInputStream(sourceTreeResource);
+		}
+		return null;
+	}
+
 	/**
 	 * Represents the structure of a Tribin entry in the json file.
 	 * Jackson uses this class to map json data to Java fields.
 	 */
 	private static class TriBinData {
-		
+
 		// Unique ID of the TriBin
 		public int triBinID;
-		
+
 		// Campus zone where the TriBin is located
 		public char zone;
-		
+
 		// Location description of the TriBin
 		public String location;
-		
+
 		// X-coordinate of the TriBin's gps location
 		public double binCoordinatesX;
-		
+
 		// Y-coordinate of the TriBin's gps location
 		public double binCoordinatesY;
-		
+
 		// List of bins belonging to the TriBin
 		public List<Bin> bins;
 
@@ -107,23 +123,23 @@ public class BinDataLoader {
 		public String sensorStatus;
 
 		// how long ago the last reading was, in minutes
-		public int lastUpdatedMinutesAgo;
+		public Integer lastUpdatedMinutesAgo;
 	}
-	
+
 	/**
 	 * Represents the structure of an individual bin in the json data
 	 */
 	private static class BinData {
-		
+
 		// Unique ID of the Bin
 		public int binID;
-		
+
 		// ID of the TriBin that this Bin belongs to
 		public int triBinID;
-		
+
 		// Type of waste collected by the bin
 		public String binType;
-		
+
 		// Current amount of waste in the bin measured by height
 		public double wasteHeight;
 	}
