@@ -1,4 +1,5 @@
 package main.java.trashtalk.wastemonitoring;
+import main.java.trashtalk.wastemonitoring.controller.SystemCheckController;
 
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -62,6 +63,12 @@ public class Application {
 			server.createContext(
 					"/api/login",
 					new LoginController(loginService)
+			);
+
+			// Connect /api/system-check to the SystemCheckController.
+			server.createContext(
+					"/api/system-check",
+					new SystemCheckController(loginService)
 			);
 
 			// Start the server
