@@ -25,7 +25,12 @@ public class DatabaseInitializer {
 		createTables();
 
 		// Add missing GPS rows without overwriting readings or locations already in the database.
-		loadMissingTriBinData();
+		// On the shared Supabase database this only runs when it is empty, so starting
+		// the backend never adds bins to the team's shared data by surprise.
+		if (isLocalDatabase() || isTriBinsEmpty())
+			loadMissingTriBinData();
+		else
+			System.out.println("Shared database: skipping the GPS bin sync.");
 
 		if (isStaffEmpty())
 			loadInitialStaffData();
@@ -307,6 +312,35 @@ private static void loadInitialStaffData() {
 		throw new RuntimeException(
 				"Error loading initial staff data.", e
 			);
+	}
+}
+
+
+private static boolean isLocalDatabase() {
+
+	// The local database is H2; the shared Supabase database is PostgreSQL.
+	try (Connection connection = DatabaseConfig.getConnection()) {
+		return "H2".equals(connection.getMetaData().getDatabaseProductName());
+	} catch (SQLException e) {
+		throw new RuntimeException("Error checking database.", e);
+	}
+}
+
+
+private static boolean isTriBinsEmpty() {
+
+	// SQL statement that counts the number of TriBins currently in the database
+	String sql = "SELECT COUNT(*) FROM triBins";
+
+	try (Connection connection = DatabaseConfig.getConnection();
+			PreparedStatement statement = connection.prepareStatement(sql);
+			var resultSet = statement.executeQuery()) {
+
+		resultSet.next();
+		return resultSet.getInt(1) == 0;
+
+	} catch (SQLException e) {
+		throw new RuntimeException("Error checking database.", e);
 	}
 }
 
