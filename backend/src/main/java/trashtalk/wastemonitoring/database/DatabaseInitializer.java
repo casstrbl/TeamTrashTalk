@@ -54,17 +54,7 @@ public class DatabaseInitializer {
 				lastUpdated TIMESTAMP
 				)
 				""";
-
-		/**
-		 * Adds the sensor columns individually (for compatibility with
-		 * both H2 and PostgreSQL) to databases made before they existed
-		 */
-		String[] addSensorColumns = {
-			    "ALTER TABLE triBins ADD COLUMN IF NOT EXISTS battery INT",
-			    "ALTER TABLE triBins ADD COLUMN IF NOT EXISTS sensorStatus VARCHAR(10)",
-			    "ALTER TABLE triBins ADD COLUMN IF NOT EXISTS lastUpdated TIMESTAMP",
-			    "ALTER TABLE staff ADD COLUMN IF NOT EXISTS password_hash TEXT"
-			};
+		
 
 		/**
 		 * Creates new table for Bin data if one does not already exist
@@ -75,6 +65,7 @@ public class DatabaseInitializer {
 				triBinID INT NOT NULL,
 				binType VARCHAR(20) NOT NULL,
 				wasteHeight DOUBLE PRECISION,
+				lastReadingTime TIMESTAMP,
 
 				FOREIGN KEY (triBinID)
 					REFERENCES triBins(triBinID)
@@ -92,10 +83,13 @@ public class DatabaseInitializer {
 				zone CHAR,
 				message TEXT,
 				severity VARCHAR(20),
-				time TIMESTAMP
+				time TIMESTAMP,
+				resolved BOOLEAN NOT NULL DEFAULT FALSE,
+				resolved_at TIMESTAMP
 				)
 				""";
 
+		
 		/**
 		 * Creates new table for StaffMember data if one does not already exist
 		 */
@@ -105,7 +99,8 @@ public class DatabaseInitializer {
 				name VARCHAR(50),
 				role VARCHAR(20),
 				zone CHAR,
-				email TEXT
+				email TEXT,
+				password_hash TEXT
 				)
 				""";
 
@@ -167,12 +162,6 @@ public class DatabaseInitializer {
                     );
                 }
 
-				// make sure older databases have the  sensor columns
-				try (Statement alterStatement = connection.createStatement()) {
-				    for (String sql : addSensorColumns) {
-				        alterStatement.executeUpdate(sql);
-				    }
-				}
 
 				// Keep sensor readings even when the server restarts.
                 try (Statement historyStatement = connection.createStatement()) {
@@ -187,7 +176,7 @@ public class DatabaseInitializer {
                             readingTime TIMESTAMP NOT NULL
                         )
                         """);
-                }
+                }            
 
 		} catch (SQLException e) {
 
