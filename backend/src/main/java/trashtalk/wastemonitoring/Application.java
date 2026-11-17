@@ -15,12 +15,15 @@ import main.java.trashtalk.wastemonitoring.service.HistoryCsvService;
 import main.java.trashtalk.wastemonitoring.service.HistoryService;
 import main.java.trashtalk.wastemonitoring.service.LoginService;
 import main.java.trashtalk.wastemonitoring.controller.TriBinManagementController;
+import main.java.trashtalk.wastemonitoring.controller.SimulateController;
+import main.java.trashtalk.wastemonitoring.database.DemoAccountSeeder;
 
 public class Application {
 
 	public static void main(String[] args) {
 
 		DatabaseInitializer.initializeDatabase();
+		DemoAccountSeeder.seedFromEnvironment();
 		DatabaseViewer.viewTriBins();
 		DatabaseViewer.viewBins();
 
@@ -76,6 +79,12 @@ public class Application {
 			server.createContext(
 					"/api/admin/tribins",
 					new TriBinManagementController(loginService)
+			);
+
+			// test panel buttons (editors only)
+			server.createContext(
+					"/api/simulate/",
+					new SimulateController(loginService)
 			);
 
 			// Start the server
