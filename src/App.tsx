@@ -15,6 +15,7 @@ import { mockBins } from './data/mockBins'
 import { campusBoundary } from './data/campusBoundary'
 import { campusBuildings } from './data/campusBuildings'
 import HistoryPage from './HistoryPage'
+import ToolsPage from './ToolsPage'
 
 // fill bands: green 0-49, yellow 50-79, red 80-100
 const WARN_AT = 50
@@ -889,7 +890,7 @@ function BinMap(props: BinMapProps) {
 
 // pages and navigation
 
-type Page = 'summary' | 'details' | 'pickup' | 'history' | 'admin'
+type Page = 'summary' | 'details' | 'pickup' | 'history' | 'tools' | 'admin'
 
 // tabler icons (MIT, tabler.io/icons), inlined like the app's other svgs
 const ICONS = {
@@ -903,6 +904,7 @@ const ICONS = {
   circleCheck: <><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" /><path d="M9 12l2 2l4 -4" /></>,
   arrowRight: <><path d="M5 12l14 0" /><path d="M13 18l6 -6" /><path d="M13 6l6 6" /></>,
   arrowLeft: <><path d="M5 12l14 0" /><path d="M5 12l6 6" /><path d="M5 12l6 -6" /></>,
+  flask: <><path d="M9 3l6 0" /><path d="M10 9l4 0" /><path d="M10 3v6l-4 11a.7 .7 0 0 0 .5 1h11a.7 .7 0 0 0 .5 -1l-4 -11v-6" /></>,
 }
 
 function Icon({ name, size = 20 }: { name: keyof typeof ICONS; size?: number }) {
@@ -918,6 +920,7 @@ const NAV_ITEMS: { page: Page; label: string; icon: keyof typeof ICONS; editorsO
   { page: 'details', label: 'Details', icon: 'layoutGrid' },
   { page: 'pickup', label: 'Pickup List', icon: 'listCheck' },
   { page: 'history', label: 'History', icon: 'chartLine' },
+  { page: 'tools', label: 'Editor tools', icon: 'flask', editorsOnly: true },
   { page: 'admin', label: 'Settings', icon: 'settings' },
 ]
 
@@ -1549,6 +1552,10 @@ export default function App() {
     }
   }, [sessionId])
   const [apiBins, setApiBins] = useState<Tribin[]>(TRIBINS)
+  // false while the site is showing mockBins because the server isn't answering
+  const [apiLive, setApiLive] = useState(false)
+  // lets the editor tools refresh the bins right after a change instead of waiting for the poll
+  const refreshBinsRef = useRef<() => void>(() => {})
 
   // Poll the local Java API so simulated sensor readings show up automatically.
   // If the backend is unavailable, the site keeps its existing mock bins.
@@ -1565,7 +1572,10 @@ export default function App() {
         const response = await fetch(`${apiUrl}/api/tribins`, { cache: 'no-store' })
         if (!response.ok) throw new Error('Failed to load bins')
         const data: Tribin[] = await response.json()
-        if (active) setApiBins(data)
+        if (active) {
+          setApiBins(data)
+          setApiLive(true)
+        }
       } catch {
         // Expected when the local backend isn't running: keep sample data.
       } finally {
@@ -1573,6 +1583,7 @@ export default function App() {
       }
     }
 
+    refreshBinsRef.current = () => { void refreshBins() }
     void refreshBins()
     const timer = window.setInterval(() => { void refreshBins() }, refreshMs)
     return () => { active = false; window.clearInterval(timer) }
@@ -1634,6 +1645,11 @@ export default function App() {
     setMapBinId(null)
     setSelectedBin(null)
   }, [currentUserId, zonesKey])
+
+  // editor tools aren't there for viewers (e.g. after switching to a viewer from the account menu)
+  useEffect(() => {
+    if (currentRole !== 'editor' && page === 'tools') setPage('summary')
+  }, [currentRole, page])
 
   // scroll after render, and only when the target isn't fully on screen. in map view the target
   // is the map itself, so a jumped-to pin (aimed low in the map) clears the floating tab bar
@@ -2103,6 +2119,19 @@ export default function App() {
               </div>
               )}
             </>
+          )}
+
+          {page === 'tools' && currentRole === 'editor' && (
+            <ToolsPage
+              bins={myBins}
+              allBins={apiBins}
+              fillOn={alertSettings.fillOn}
+              fillAt={alertThreshold}
+              offlineOn={alertSettings.offlineOn}
+              usingSampleData={!apiLive}
+              onChanged={() => refreshBinsRef.current()}
+              onScrollTop={scrollToTop}
+            />
           )}
 
           {/* manage tab */}

@@ -89,3 +89,31 @@ To verify: run the local backend with simulation enabled; open
 `http://localhost:8080/api/tribins` twice a few seconds apart. Fill levels
 should rise. Then run `pnpm dev` and open the local dashboard, which polls the
 API. GitHub Pages has no Java backend and will continue to show mock data.
+
+## Sprint 5: Test Panel and Manage bins (editor tools)
+
+Editors get an **Editor tools** tab (flask icon) with two views:
+
+- **Test Panel:** pick a bin, then fill a compartment to any %, empty it, make its sensor go offline, add a week of demo readings, or reset every bin to its starting level. Each button calls `/api/simulate/...`, which saves readings the same way a real sensor would, so the cards, alerts, pickup list and history all react. A "What happened" list explains each result, like "Bin 12 recycling set to 85% → alert sent". The System check button shows a ✓ or ✗ for each backend check.
+- **Manage bins:** add a bin, edit its zone and location name, or move it by tapping the map or typing lat/long. Bins with no zone yet show up here too.
+
+These buttons change real server data, so they need a server login with the editor role. The dashboard's own sign-in is still the browser demo. To make test logins without putting passwords in the repo, set these before starting the backend:
+
+```bash
+export DEMO_EDITOR_EMAIL=editor@example.com
+export DEMO_EDITOR_PASSWORD=pick-a-password
+export DEMO_VIEWER_EMAIL=viewer@example.com   # optional
+export DEMO_VIEWER_PASSWORD=pick-a-password
+```
+
+On startup the backend creates those accounts (or resets their passwords if they already exist).
+
+Simulate routes (editor token required, `Authorization: Bearer <token>` from `POST /api/login`):
+
+| Route | Body |
+|---|---|
+| `POST /api/simulate/fill` | `{"triBinID": 12, "stream": "recycling", "percent": 85}` |
+| `POST /api/simulate/empty` | `{"triBinID": 12}` |
+| `POST /api/simulate/offline` | `{"triBinID": 12}` |
+| `POST /api/simulate/demo-week` | `{"triBinID": 12}` |
+| `POST /api/simulate/reset` | `{}` (past readings stay in history) |
