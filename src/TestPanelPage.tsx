@@ -36,7 +36,17 @@ interface LogEntry {
   ok: boolean
 }
 
-type Action = 'fill' | 'empty' | 'offline' | 'week' | 'reset' | 'check'
+type Action = 'fill' | 'empty' | 'offline' | 'week' | 'reset' | 'check' | 'timer'
+
+interface TimerStatus {
+  running: boolean
+  intervalSeconds: number
+  simSpeed: number
+  stopsAt: string | null
+}
+
+// the pickup list logs a pickup when a compartment that was at least this full reads almost empty
+const PICKUP_FROM = 50
 
 const STREAMS: Stream[] = ['Landfill', 'Recycling', 'Compost']
 
@@ -86,7 +96,24 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
   const [confirmReset, setConfirmReset] = useState(false)
   const [log, setLog] = useState<LogEntry[]>([])
   const [checks, setChecks] = useState<Record<string, boolean> | null>(null)
+  const [timer, setTimer] = useState<TimerStatus | null>(null)
   const nextLogId = useRef(1)
+
+  // is the live simulation running? checked on open, then every 15 seconds (it can stop by itself)
+  useEffect(() => {
+    let active = true
+    async function load() {
+      try {
+        const res = await apiRequest<TimerStatus>('/api/simulate/timer')
+        if (active) setTimer(res)
+      } catch {
+        // the tile shows the start button, and pressing it reports the error
+      }
+    }
+    void load()
+    const id = window.setInterval(() => { void load() }, 15000)
+    return () => { active = false; window.clearInterval(id) }
+  }, [])
 
   // the picked bin can disappear (zone change, reset); fall back to the first one
   const bin = sorted.find(b => b.id === binId) ?? sorted[0]
@@ -126,9 +153,11 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
 
   function empty() {
     if (!bin) return
-    const wasOnList = Math.max(...bin.compartments.map(c => c.fill)) >= fillAt
-    run('empty', 'empty', { triBinID: triBinNumber(bin.id) }, res =>
-      `${bin.name} emptied → all three compartments at ${res.fullest ?? 2}%${wasOnList ? ', off the pickup list' : ''}`)
+    const fullestBefore = Math.max(...bin.compartments.map(c => c.fill))
+    run('empty', 'empty', { triBinID: triBinNumber(bin.id) }, res => {
+      const base = `${bin.name} emptied → all compartments at ${res.fullest ?? 2}%`
+      return fullestBefore >= PICKUP_FROM ? `${base}, pickup logged` : `${base} (under ${PICKUP_FROM}% before, so no pickup logged)`
+    })
   }
 
   function offline() {
@@ -147,6 +176,23 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
     if (!confirmReset) return setConfirmReset(true)
     setConfirmReset(false)
     run('reset', 'reset', {}, res => `${res.message} → past readings stay in History`)
+  }
+
+  async function toggleTimer() {
+    const starting = !timer?.running
+    setBusy('timer')
+    try {
+      const res = await apiRequest<TimerStatus>(`/api/simulate/${starting ? 'timer-start' : 'timer-stop'}`, 'POST', {})
+      setTimer(res)
+      addLog(starting
+        ? `Live sensor simulation started → zoned bins report every ${res.intervalSeconds} seconds`
+        : 'Live sensor simulation stopped', true)
+      onChanged()
+    } catch (err) {
+      addLog(err instanceof Error ? err.message : 'Could not change the simulation.', false)
+    } finally {
+      setBusy(null)
+    }
   }
 
   async function systemCheck() {
@@ -210,7 +256,7 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <ActionTile step="①" title={`Fill bin to ${percent}%`} text="Pretend a sensor just reported this level for one compartment.">
+        <ActionTile step="1" title="Set fill level" text="Simulate a sensor reading for one compartment.">
           <div className="flex flex-wrap gap-1.5 mb-3" role="group" aria-label="Compartment">
             {STREAMS.map(s => (
               <button key={s} onClick={() => setStream(s)} aria-pressed={stream === s}
@@ -223,25 +269,41 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
             <span className="flex-1 text-center font-mono text-2xl font-bold text-pine">{percent}%</span>
             <button onClick={() => setPercent(p => Math.min(100, p + 5))} aria-label="Raise fill percent" className="w-11 h-11 rounded-full bg-ivory/80 text-pine text-xl font-bold hover:bg-ivory">+</button>
           </div>
-          <button onClick={fill} disabled={busy !== null} className={BUTTON}>{busy === 'fill' ? 'Sending…' : `Fill ${stream.toLowerCase()} to ${percent}%`}</button>
+          <button onClick={fill} disabled={busy !== null} className={BUTTON}>{busy === 'fill' ? 'Sending…' : `Set ${stream.toLowerCase()} to ${percent}%`}</button>
         </ActionTile>
 
-        <ActionTile step="②" title="Empty bin" text="All three compartments drop to almost empty, like right after a pickup. No “emptied” button needed.">
+        <ActionTile step="2" title="Empty bin" text="Simulate a collection. Every compartment drops to near empty, and the pickup is logged automatically.">
           <button onClick={empty} disabled={busy !== null} className={BUTTON}>{busy === 'empty' ? 'Sending…' : 'Empty bin'}</button>
         </ActionTile>
 
-        <ActionTile step="③" title="Sensor goes offline" text="The sensor stops reporting. Its last contact moves back 6 hours and an offline alert shows up.">
+        <ActionTile step="3" title="Take sensor offline" text="Simulate a sensor that stops reporting. An offline alert is raised.">
           <button onClick={offline} disabled={busy !== null || offlineNow} className={BUTTON}>
-            {busy === 'offline' ? 'Sending…' : offlineNow ? 'Already offline' : 'Sensor goes offline'}
+            {busy === 'offline' ? 'Sending…' : offlineNow ? 'Sensor is offline' : 'Take sensor offline'}
           </button>
-          {offlineNow && <p className="text-xs font-semibold text-pine-muted mt-2 text-center">Fill or empty the bin to bring it back online.</p>}
+          {offlineNow && <p className="text-xs font-semibold text-pine-muted mt-2 text-center">A new fill or empty reading brings it back online.</p>}
         </ActionTile>
 
-        <ActionTile step="④" title="Add a week of demo data" text="Adds 7 days of hourly readings to this bin so the History graph and CSV export have something to show.">
-          <button onClick={demoWeek} disabled={busy !== null} className={BUTTON}>{busy === 'week' ? 'Adding…' : 'Add a week of demo data'}</button>
+        <ActionTile step="4" title="Add demo history" text="Generate 7 days of hourly readings for this bin's History chart and CSV export.">
+          <button onClick={demoWeek} disabled={busy !== null} className={BUTTON}>{busy === 'week' ? 'Adding…' : 'Add 7 days of readings'}</button>
         </ActionTile>
 
-        <ActionTile step="⑤" title="Reset demo" text="Puts every bin back to its starting level and status. Past readings stay in History.">
+        <ActionTile
+          step="5"
+          title="Live sensor simulation"
+          text={`Every bin with a zone reports every ${timer?.intervalSeconds ?? 5} seconds at ${timer?.simSpeed ?? 60}× speed. Stops automatically after 30 minutes.`}
+        >
+          {timer?.running && (
+            <p className="flex items-center justify-center gap-2 text-sm font-bold text-olive-ink mb-3">
+              <span className="w-2 h-2 rounded-full bg-status-ok animate-pulse motion-reduce:animate-none" />
+              Running{timer.stopsAt ? ` · stops at ${new Date(timer.stopsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}
+            </p>
+          )}
+          <button onClick={toggleTimer} disabled={busy !== null} className={BUTTON}>
+            {busy === 'timer' ? 'Working…' : timer?.running ? 'Stop simulation' : 'Start simulation'}
+          </button>
+        </ActionTile>
+
+        <ActionTile step="6" title="Reset demo" text="Restore every bin to its starting level and status. History is kept.">
           <button onClick={reset} disabled={busy !== null}
             className={confirmReset ? `${BUTTON.replace('bg-pine', 'bg-status-critical').replace('hover:bg-forest-light', 'hover:brightness-110')}` : BUTTON}
           >
@@ -249,7 +311,7 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
           </button>
         </ActionTile>
 
-        <ActionTile step="✓" title="System check" text="Runs quick checks on the server and shows a ✓ or ✗ for each.">
+        <ActionTile step="7" title="System check" text="Verify the database, login, alerts, CSV export and sensor failure detection.">
           {checks && (
             <ul className="space-y-1.5 mb-3">
               {Object.entries(checks).map(([key, ok]) => (
@@ -273,7 +335,7 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
           )}
         </div>
         {log.length === 0 ? (
-          <p className="text-sm text-pine-muted py-2">Press a button above. What it did shows up here, and the Summary, Details, Pickup List and History pages update too.</p>
+          <p className="text-sm text-pine-muted py-2">Results appear here. The Summary, Details, Pickup List and History pages update at the same time.</p>
         ) : (
           <ul aria-live="polite">
             {log.map(entry => (

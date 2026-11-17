@@ -26,6 +26,7 @@ import main.java.trashtalk.wastemonitoring.service.BinService;
 import main.java.trashtalk.wastemonitoring.service.DemoDataGenerator;
 import main.java.trashtalk.wastemonitoring.service.FakeSensorService;
 import main.java.trashtalk.wastemonitoring.service.LoginService;
+import main.java.trashtalk.wastemonitoring.service.SensorTimer;
 
 // editor-only endpoints behind the test panel buttons, so the client can test without real sensors
 // POST /api/simulate/fill       {"triBinID": 12, "stream": "recycling", "percent": 85}
@@ -33,6 +34,7 @@ import main.java.trashtalk.wastemonitoring.service.LoginService;
 // POST /api/simulate/offline    {"triBinID": 12}
 // POST /api/simulate/demo-week  {"triBinID": 12}
 // POST /api/simulate/reset      {}
+// GET  /api/simulate/timer, POST /api/simulate/timer-start, POST /api/simulate/timer-stop  (live fake sensors)
 // fill and empty go through the same gateway path a real sensor uses, so history, alerts and pickups react for real
 public class SimulateController implements HttpHandler {
 
@@ -60,24 +62,30 @@ public class SimulateController implements HttpHandler {
     @Override
     public void handle(HttpExchange exchange) throws IOException {
         exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
-        exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "POST, OPTIONS");
+        exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
         if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
             exchange.sendResponseHeaders(204, -1);
             return;
         }
-        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+        String action = exchange.getRequestURI().getPath()
+                .replaceFirst("^/api/simulate/?", "")
+                .replaceAll("/+$", "");
+
+        // only the timer status is a GET, everything else changes data
+        boolean isGet = "GET".equalsIgnoreCase(exchange.getRequestMethod());
+        if (!(isGet && "timer".equals(action)) && !"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
             send(exchange, 405, Map.of("error", "Method not allowed"));
             return;
         }
         if (!isEditor(exchange)) {
             return;
         }
-
-        String action = exchange.getRequestURI().getPath()
-                .replaceFirst("^/api/simulate/?", "")
-                .replaceAll("/+$", "");
+        if (isGet) {
+            send(exchange, 200, SensorTimer.status());
+            return;
+        }
 
         SimulateRequest request;
         try {
@@ -94,6 +102,8 @@ public class SimulateController implements HttpHandler {
                 case "offline" -> offline(exchange, request);
                 case "demo-week" -> demoWeek(exchange, request);
                 case "reset" -> reset(exchange);
+                case "timer-start" -> send(exchange, 200, SensorTimer.start());
+                case "timer-stop" -> send(exchange, 200, SensorTimer.stop());
                 default -> send(exchange, 404, Map.of("error", "Simulate route not found"));
             }
         } catch (SQLException | RuntimeException e) {

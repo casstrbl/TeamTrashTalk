@@ -38,8 +38,8 @@ export default function ToolsPage({ bins, allBins, fillOn, fillAt, offlineOn, us
           <h1 className="text-3xl lg:text-4xl font-bold text-pine tracking-tight">{tab === 'test' ? 'Test Panel' : 'Manage bins'}</h1>
           <p className="text-sm md:text-[15px] font-medium text-pine-muted mt-1">
             {tab === 'test'
-              ? 'Press a button to see how the app reacts, no real sensors needed.'
-              : 'Add a bin, change its details, or move it on the map.'}
+              ? 'Simulate sensor activity to see how the system responds.'
+              : 'Add bins, update their details, and organize them into zones.'}
           </p>
         </div>
         <span className="text-xs bg-teal-soft text-teal px-3 py-1.5 rounded-full font-bold whitespace-nowrap">Editors only</span>

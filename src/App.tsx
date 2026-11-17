@@ -10,7 +10,6 @@ import BinLogo from './BinLogo'
 import Aura from './Aura'
 import LoginPage from './LoginPage'
 import PickupPage from './PickupPage'
-import type { PickupBin, PickupRecord } from './PickupPage'
 import { mockBins } from './data/mockBins'
 import { campusBoundary } from './data/campusBoundary'
 import { campusBuildings } from './data/campusBuildings'
@@ -34,7 +33,8 @@ const TEAL_HEX = '#1B5B65' // teal: selected pin ring, building names
 
 type Role = 'editor' | 'viewer'
 type Status = 'ok' | 'warn' | 'critical' | 'offline'
-type Zone = 'Zone A' | 'Zone B'
+// "Zone A", "Zone B"... editors can make more on the zones map, so any string
+type Zone = string
 type Stream = 'Landfill' | 'Recycling' | 'Compost'
 
 interface Compartment {
@@ -100,9 +100,10 @@ const SAMPLE_CLEAR_BINS: Tribin[] = TRIBINS.map(b => ({
   lastUpdated: b.sensorStatus === 'offline' ? '1 min ago' : b.lastUpdated,
 }))
 
-const ALL_ZONES: Zone[] = [
-    ...new Set(TRIBINS.map(bin => bin.zone))
-]
+// every zone that has bins, A to Z. bins with no zone yet ("") aren't on the dashboards
+function zonesOf(bins: Tribin[]): Zone[] {
+  return [...new Set(bins.map(bin => bin.zone).filter(Boolean))].sort()
+}
 
 // what sets off an alert. everyone picks their own on the settings page
 interface AlertSettings {
@@ -119,7 +120,8 @@ const DEFAULT_ALERT_SETTINGS: AlertSettings = { fillOn: true, fillAt: 80, offlin
 // changes survive a reload), alert settings and pickup records. it's per browser, and can be
 // missing or blocked (private mode), so every read and write is guarded. the backend should own
 // all of this later
-const STORE = { session: 'tt-session', staff: 'tt-staff-v2', alerts: 'tt-alert-settings-v2', pickups: 'tt-pickups-v1' }
+// pickups used to live here too (tt-pickups-v1); the server finds them in the readings now
+const STORE = { session: 'tt-session', staff: 'tt-staff-v2', alerts: 'tt-alert-settings-v2' }
 
 function loadStored<T>(key: string, fallback: T): T {
   try {
@@ -1346,8 +1348,9 @@ function SummaryPage({
 
 // role and zone controls for one person, shared by the admin table and the phone cards.
 // nobody can change their own role, and only editors reach admin, so an editor always remains
-function StaffEditor({ member, isSelf, onToggleRole, onToggleZone }: {
+function StaffEditor({ member, zones, isSelf, onToggleRole, onToggleZone }: {
   member: StaffMember
+  zones: Zone[]
   isSelf: boolean
   onToggleRole: () => void
   onToggleZone: (zone: Zone) => void
@@ -1373,7 +1376,7 @@ function StaffEditor({ member, isSelf, onToggleRole, onToggleZone }: {
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="w-14 text-[13px] font-bold text-pine-muted">Zones</span>
-        {ALL_ZONES.map(zone => {
+        {zones.map(zone => {
           const on = member.zones.includes(zone)
           return (
             <button
@@ -1531,7 +1534,6 @@ export default function App() {
   const alertThreshold = alertSettings.fillAt
   const setAlertThreshold = (next: number | ((t: number) => number)) =>
     setAlertSettings(prev => ({ ...prev, fillAt: typeof next === 'function' ? next(prev.fillAt) : next }))
-  const [pickups, setPickups] = useState<PickupRecord[]>(() => loadStoredList(STORE.pickups, []))
   const [pickupZone, setPickupZone] = useState<string>('All')
   const [dismissedIds, setDismissedIds] = useState<string[]>([])
   const [selectedBin, setSelectedBin] = useState<Tribin | null>(null)
@@ -1541,8 +1543,6 @@ export default function App() {
 
   useEffect(() => { saveStored(STORE.staff, staffList) }, [staffList])
   useEffect(() => { saveStored(STORE.alerts, alertSettingsByUser) }, [alertSettingsByUser])
-  // only keep the last two weeks of pickups in the browser
-  useEffect(() => { saveStored(STORE.pickups, pickups.filter(p => Date.now() - p.at < 14 * 24 * 60 * 60 * 1000)) }, [pickups])
   useEffect(() => {
     try {
       if (sessionId) localStorage.setItem(STORE.session, sessionId)
@@ -1596,7 +1596,9 @@ export default function App() {
   const currentUser = signedInUser ?? staffList[0]
   const currentUserId = currentUser.id
   const currentRole = currentUser.role
-  const visibleZones = currentRole === 'editor' ? ALL_ZONES : ALL_ZONES.filter(z => currentUser.zones.includes(z))
+  // zones come from the bins themselves, so a zone made on the zones map shows up everywhere
+  const allZones = useMemo(() => zonesOf(apiBins), [apiBins])
+  const visibleZones = currentRole === 'editor' ? allZones : allZones.filter(z => currentUser.zones.includes(z))
   const zonesKey = visibleZones.join()
   const sampleData = currentUserId === SAMPLE_USER_ID
   const myBins = useMemo(
@@ -1784,20 +1786,6 @@ export default function App() {
     setPage('pickup')
   }
 
-  function markEmptied(bin: PickupBin) {
-    const top = bin.compartments.reduce((a, b) => (b.fill > a.fill ? b : a))
-    setPickups(prev => [...prev, {
-      id: `${bin.id}-${Date.now()}`,
-      binId: bin.id, binName: bin.name, zone: bin.zone, location: bin.location,
-      stream: top.label, fill: top.fill,
-      byId: currentUser.id, byName: currentUser.name, at: Date.now(),
-    }])
-  }
-
-  function undoPickup(recordId: string) {
-    setPickups(prev => prev.filter(p => p.id !== recordId))
-  }
-
   // straight to the top, through the smooth scroller so the two never disagree
   function scrollToTop() {
     const lenis = lenisRef.current
@@ -1933,9 +1921,6 @@ export default function App() {
               zoneFilter={pickupZone}
               onZoneFilter={setPickupZone}
               threshold={alertThreshold}
-              pickups={pickups.filter(p => visibleZones.includes(p.zone as Zone))}
-              onEmptied={markEmptied}
-              onUndo={undoPickup}
               onShowOnMap={showOnMap}
             />
           )}
@@ -2173,6 +2158,7 @@ export default function App() {
                         <div className="mt-4 pt-4 border-t border-pine/[0.07]">
                           <StaffEditor
                             member={member}
+                            zones={allZones}
                             isSelf={member.id === currentUserId}
                             onToggleRole={() => toggleStaffRole(member.id)}
                             onToggleZone={zone => toggleZoneAssignment(member.id, zone)}
@@ -2246,6 +2232,7 @@ export default function App() {
                               <div className="bg-ivory/65 rounded-[20px] px-5 py-4">
                                 <StaffEditor
                                   member={member}
+                                  zones={allZones}
                                   isSelf={member.id === currentUserId}
                                   onToggleRole={() => toggleStaffRole(member.id)}
                                   onToggleZone={zone => toggleZoneAssignment(member.id, zone)}

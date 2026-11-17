@@ -94,8 +94,10 @@ API. GitHub Pages has no Java backend and will continue to show mock data.
 
 Editors get an **Editor tools** tab (flask icon) with two views:
 
-- **Test Panel:** pick a bin, then fill a compartment to any %, empty it, make its sensor go offline, add a week of demo readings, or reset every bin to its starting level. Each button calls `/api/simulate/...`, which saves readings the same way a real sensor would, so the cards, alerts, pickup list and history all react. A "What happened" list explains each result, like "Bin 12 recycling set to 85% → alert sent". The System check button shows a ✓ or ✗ for each backend check.
+- **Test Panel:** pick a bin, then set a compartment to any %, empty it, take its sensor offline, add a week of demo readings, start or stop the live sensor simulation (zoned bins only, stops by itself after 30 minutes), or reset every bin to its starting level. Each button calls `/api/simulate/...`, which saves readings the same way a real sensor would, so the cards, alerts, pickup list and history all react. A "What happened" list explains each result, like "Bin 12 recycling set to 85% → alert sent". The System check button shows a ✓ or ✗ for each backend check.
 - **Manage bins:** add a bin, edit its zone and location name, or move it by tapping the map or typing lat/long. Bins with no zone yet show up here too.
+- **Zones map** (inside Manage bins): drag on the map to draw an area, drag the area to move it, or tap bins one at a time, then put them all in a zone (an existing letter or a new one). Zones come from the bins, so a new zone shows up on the dashboard and in Staff & Zones right away. Bins with no zone aren't on the dashboards.
+- **Pickup List:** no "Emptied" button. The server finds pickups in the sensor readings (`GET /api/pickups/detected?days=7`): a compartment that was at least 50% full and then reads 20% or less, with a drop of 35+ points. Compartments of one tribin emptied within 15 minutes count as one pickup. It can't tell who emptied the bin, so it shows the zone.
 
 These buttons change real server data, so they need a server login with the editor role. The dashboard's own sign-in is still the browser demo. To make test logins without putting passwords in the repo, set these before starting the backend:
 
@@ -117,3 +119,6 @@ Simulate routes (editor token required, `Authorization: Bearer <token>` from `PO
 | `POST /api/simulate/offline` | `{"triBinID": 12}` |
 | `POST /api/simulate/demo-week` | `{"triBinID": 12}` |
 | `POST /api/simulate/reset` | `{}` (past readings stay in history) |
+| `GET /api/simulate/timer` | live simulation status |
+| `POST /api/simulate/timer-start` / `timer-stop` | `{}` |
+| `POST /api/admin/zones/assign` | `{"zone": "C", "triBinIDs": [12, 13]}` |

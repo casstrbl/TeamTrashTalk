@@ -5,6 +5,7 @@ import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-lea
 import 'leaflet/dist/leaflet.css'
 import { apiRequest, triBinNumber } from './api'
 import type { ToolBin } from './TestPanelPage'
+import ZonesMap from './ZonesMap'
 
 // editor-only: add a bin, edit its details, or move it (tap the map or type lat/long).
 // uses crystal's /api/admin/tribins endpoints
@@ -88,6 +89,7 @@ export default function ManageBinsPage({ bins, onChanged, onScrollTop }: {
   onChanged: () => void
   onScrollTop: () => void // the form opens at the top, so bring it into view
 }) {
+  const [view, setView] = useState<'list' | 'zones'>('list')
   const [query, setQuery] = useState('')
   const [draft, setDraft] = useState<Draft | null>(null)
   const [saving, setSaving] = useState(false)
@@ -168,8 +170,28 @@ export default function ManageBinsPage({ bins, onChanged, onScrollTop }: {
     }
   }
 
+  const viewSwitch = (
+    <div className="flex items-center glass rounded-full p-1 text-[13px] self-start" role="group" aria-label="View">
+      {([['list', 'Bin list'], ['zones', 'Zones map']] as const).map(([value, label]) => (
+        <button key={value} onClick={() => { setView(value); setDraft(null) }} aria-pressed={view === value}
+          className={`px-4 min-h-9 rounded-full font-bold transition-colors ${view === value ? 'bg-pine text-ivory' : 'text-pine-muted hover:text-pine'}`}
+        >{label}</button>
+      ))}
+    </div>
+  )
+
+  if (view === 'zones') {
+    return (
+      <div className="space-y-5 md:space-y-6">
+        {viewSwitch}
+        <ZonesMap bins={bins} onChanged={onChanged} />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-5 md:space-y-6">
+      {viewSwitch}
       {notice && !draft && (
         <p role="status" className="rounded-2xl bg-olive-soft text-olive-ink text-sm font-bold px-4 py-3">{notice}</p>
       )}
