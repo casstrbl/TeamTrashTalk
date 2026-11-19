@@ -8,6 +8,13 @@ import main.java.trashtalk.wastemonitoring.config.DatabaseConfig;
 import main.java.trashtalk.wastemonitoring.service.HistoryCsvService;
 import main.java.trashtalk.wastemonitoring.service.LoginService;
 import main.java.trashtalk.wastemonitoring.service.SensorFailureService;
+import main.java.trashtalk.wastemonitoring.service.BinService;
+import main.java.trashtalk.wastemonitoring.service.TriBinService;
+import main.java.trashtalk.wastemonitoring.model.Bin;
+import main.java.trashtalk.wastemonitoring.model.TriBin;
+import main.java.trashtalk.wastemonitoring.model.Alert;
+import main.java.trashtalk.wastemonitoring.repository.AlertRepository;
+import java.util.List;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -171,13 +178,10 @@ public class SystemCheckController implements HttpHandler {
                 checkSensorFailure()
         );
 
-        /*
-         * Brooke is still finishing the alert logic,
-         * so this check will be connected later.
-         */
+        // brooke's alert rules: a red compartment makes the tribin full
         checks.put(
                 "alertWorks",
-                false
+                checkAlerts()
         );
 
         String json =
@@ -250,6 +254,46 @@ public class SystemCheckController implements HttpHandler {
                             2,
                             now
                     );
+
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // a bin at 90% has to count as full and one at 20% can't, and an alert has to save.
+    // the test alert is rolled back, so running the check never sends a real alert
+    private boolean checkAlerts() {
+
+        try {
+
+            BinService binService = new BinService();
+            TriBinService triBinService = new TriBinService();
+
+            Bin full = new Bin(1, 1, Bin.BinType.RECYCLING);
+            full.setWasteHeight(Bin.BIN_HEIGHT * 0.9);
+            binService.setStatus(full);
+
+            Bin low = new Bin(2, 1, Bin.BinType.LANDFILL);
+            low.setWasteHeight(Bin.BIN_HEIGHT * 0.2);
+            binService.setStatus(low);
+
+            TriBin needsPickup = new TriBin(1, 'A', "system check", 0, 0, List.of(full, low));
+            TriBin fine = new TriBin(1, 'A', "system check", 0, 0, List.of(low));
+
+            if (!triBinService.isFull(needsPickup) || triBinService.isFull(fine)) {
+                return false;
+            }
+
+            try (Connection connection = DatabaseConfig.getConnection()) {
+                connection.setAutoCommit(false);
+                try {
+                    Alert alert = new Alert(1, 1, 'A', Alert.Severity.CRITICAL, "system check", Alert.Kind.FILL);
+                    new AlertRepository().save(connection, alert);
+                } finally {
+                    connection.rollback();
+                }
+            }
+            return true;
 
         } catch (Exception e) {
             return false;

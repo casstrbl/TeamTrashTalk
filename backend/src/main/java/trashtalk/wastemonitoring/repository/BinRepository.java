@@ -13,8 +13,11 @@ import java.util.Map;
 import main.java.trashtalk.wastemonitoring.config.DatabaseConfig;
 import main.java.trashtalk.wastemonitoring.model.Bin;
 import main.java.trashtalk.wastemonitoring.model.TriBin;
+import main.java.trashtalk.wastemonitoring.service.BinService;
 
 public class BinRepository {
+	
+	private final BinService binService = new BinService();
 
 	// loads every tribin and its bins from the database
 	public List<TriBin> findAllTriBins() {
@@ -37,6 +40,7 @@ public class BinRepository {
 							Bin.BinType.valueOf(resultSet.getString("binType"))
 					);
 					bin.setWasteHeight(resultSet.getDouble("wasteHeight"));
+					binService.setStatus(bin);
 
 					binsByTriBin
 						.computeIfAbsent(bin.getTriBinID(), id -> new ArrayList<>())
@@ -194,7 +198,6 @@ public class BinRepository {
         }
     }
 
-
 	// a blank zone comes back as the empty char
 
     /**
@@ -306,8 +309,126 @@ public class BinRepository {
 
         return failedCount;
     }
+    
+    /**
+     * Saves the current bin state and its parent TriBin metadata
+     * using the caller's transaction.
+     */
+    public void updateReadingState(
+            Connection connection,
+            Bin bin,
+            TriBin triBin,
+            java.time.LocalDateTime readingTime) throws SQLException {
 
-    private static char toZone(String zone) {
+        if (bin.getTriBinID() != triBin.getTriBinID()) {
+            throw new IllegalArgumentException(
+                    "The bin does not belong to this TriBin."
+            );
+        }
+
+        if (bin.getStatus() == null
+                || triBin.getLastUpdated() == null) {
+            throw new IllegalArgumentException(
+                    "Status and update time must be set before saving."
+            );
+        }
+
+        String updateBin = """
+                UPDATE bins
+                SET wasteHeight = ?, status = ?, lastReadingTIme = ?
+                WHERE binID = ? AND triBinID = ?
+                """;
+
+        String updateTriBin = """
+                UPDATE triBins
+                SET battery = ?, lastUpdated = ?
+                WHERE triBinID = ?
+                """;
+
+        try (PreparedStatement binStatement =
+                    connection.prepareStatement(updateBin);
+
+             PreparedStatement triBinStatement =
+                    connection.prepareStatement(updateTriBin)) {
+
+            // Save the individual bin's current state.
+        	binStatement.setDouble(1, bin.getWasteHeight());
+        	binStatement.setString(2, bin.getStatus().name());
+        	binStatement.setTimestamp(3, Timestamp.valueOf(readingTime));
+        	binStatement.setInt(4, bin.getBinID());
+        	binStatement.setInt(5, triBin.getTriBinID());
+
+            if (binStatement.executeUpdate() != 1) {
+                throw new SQLException(
+                        "Expected to update exactly one bin: "
+                                + bin.getBinID()
+                );
+            }
+
+            // Save the parent TriBin's latest metadata.
+            triBinStatement.setInt(1, triBin.getBattery());
+
+            triBinStatement.setTimestamp(
+                    2,
+                    Timestamp.valueOf(triBin.getLastUpdated())
+            );
+
+            triBinStatement.setInt(3, triBin.getTriBinID());
+
+            if (triBinStatement.executeUpdate() != 1) {
+                throw new SQLException(
+                        "Expected to update exactly one TriBin: "
+                                + triBin.getTriBinID()
+                );
+            }
+        }
+    }
+    
+    
+    /**
+     * Locks a bin and returns its latest applied reading time.
+     *
+     * The caller must have auto-commit disabled and must keep
+     * this transaction open until processing finishes.
+     */
+    public java.time.LocalDateTime lockLastReadingTime(
+            Connection connection,
+            int binID,
+            int triBinID) throws SQLException {
+
+        String sql = """
+                SELECT lastReadingTime
+                FROM bins
+                WHERE binID = ? AND triBinID = ?
+                FOR UPDATE
+                """;
+
+        try (PreparedStatement statement =
+                     connection.prepareStatement(sql)) {
+
+            statement.setInt(1, binID);
+            statement.setInt(2, triBinID);
+
+            try (ResultSet results = statement.executeQuery()) {
+
+                if (!results.next()) {
+                    throw new SQLException(
+                            "Could not find bin " + binID
+                    );
+                }
+
+                Timestamp timestamp =
+                        results.getTimestamp("lastReadingTime");
+
+                return timestamp == null
+                        ? null
+                        : timestamp.toLocalDateTime();
+            }
+        }
+    }
+
+	// a blank zone comes back as the empty char
+	private static char toZone(String zone) {
 		if (zone == null || zone.isBlank()) {
 			return '\0';
 		}

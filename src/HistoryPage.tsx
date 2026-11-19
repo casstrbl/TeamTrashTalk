@@ -820,11 +820,11 @@ export default function HistoryPage({ bins, sampleData, canExport }: { bins: His
         <Message title="Loading history" text="Getting the saved readings for this bin." />
       ) : !hasData ? (
         <Message
-          title={status === 'error' ? 'Can’t load history' : 'No readings saved yet'}
+          title={status === 'error' ? 'Can’t load history' : 'No readings yet'}
           text={
             status === 'error'
-              ? 'Make sure the backend is running on port 8080, then this page will fill in by itself.'
-              : 'Readings show up here as the sensors send them. For the demo, start the backend with the fake sensor timer on.'
+              ? 'The server isn’t responding. This page will fill in by itself once it’s back.'
+              : `This bin hasn’t reported any readings yet. The levels above are its last known fill.${canExport ? ' To see it fill in, start the live sensor simulation in Editor tools.' : ''}`
           }
         />
       ) : (

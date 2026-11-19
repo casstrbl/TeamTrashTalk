@@ -2,119 +2,144 @@ package test.java.trashtalk.wastemonitoring.service;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.ArrayList;
+import java.util.List;
+
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import main.java.trashtalk.wastemonitoring.model.Bin;
 import main.java.trashtalk.wastemonitoring.model.Sensor;
+import main.java.trashtalk.wastemonitoring.model.SensorReading;
+import main.java.trashtalk.wastemonitoring.model.TriBin;
 import main.java.trashtalk.wastemonitoring.service.FakeSensorService;
+import main.java.trashtalk.wastemonitoring.service.GatewayDataService;
+import main.java.trashtalk.wastemonitoring.service.HistoryService;
+import main.java.trashtalk.wastemonitoring.service.SensorFailureService;
 
 /**
- * Tests the fake sensor service used for Sprint 2.
- *
- * The test confirms that a simulated sensor reading can travel
- * through the normal backend sensor flow and update a bin.
+ * Tests simulated readings through the gateway flow,
+ * using in-memory history instead of the database.
  */
 class FakeSensorServiceTest {
 
-    /**
-     * Confirms that the fake sensor service can detect
-     * a simulated low-battery condition.
-     */
-    @Test
-    void fakeSensorDetectsLowBattery() {
+    private static final double DELTA = 0.001;
 
-        // Create the fake sensor service used for testing.
-        FakeSensorService fakeSensorService =
-                new FakeSensorService();
+    private Bin bin;
+    private TriBin triBin;
+    private Sensor sensor;
 
-        // Simulate a battery level below the configured threshold.
-        boolean isLowBattery =
-                fakeSensorService.hasLowBattery(
-                        15.0,
-                        20.0
-                );
+    private InMemoryHistoryService historyService;
+    private FakeSensorService fakeSensorService;
 
-        // Confirm that the low-battery condition is detected.
-        assertTrue(isLowBattery);
-    }
+    @BeforeEach
+    void setUp() {
+        bin = new Bin(102, 1, Bin.BinType.RECYCLING);
 
-    @Test
-    void fakeReadingUpdatesBin() {
-
-        // Create a recycling bin for the fake sensor reading.
-        Bin bin = new Bin(
+        triBin = new TriBin(
                 1,
-                1,
-                Bin.BinType.RECYCLING
+                'A',
+                "Test location",
+                0.0,
+                0.0,
+                List.of(
+                        new Bin(101, 1, Bin.BinType.LANDFILL),
+                        bin,
+                        new Bin(103, 1, Bin.BinType.COMPOST)
+                )
         );
 
-        // Create an ultrasonic sensor.
-        Sensor sensor = new Sensor(
+        sensor = new Sensor(
                 101,
                 Sensor.SensorType.ULTRASONIC
         );
-
-        // Connect the sensor to the bin being tested.
         sensor.assignToBin(bin);
 
-        // Create the service that will simulate the sensor.
-        FakeSensorService fakeSensorService =
-                new FakeSensorService();
+        historyService = new InMemoryHistoryService();
 
-        // Send a fake distance reading of 25.5 centimeters.
+        GatewayDataService gatewayDataService =
+                new GatewayDataService(historyService);
+
+        fakeSensorService = new FakeSensorService(
+                gatewayDataService,
+                new SensorFailureService()
+        );
+    }
+
+    @Test
+    void fakeSensorDetectsLowBattery() {
+        assertTrue(fakeSensorService.hasLowBattery(15.0, 20.0));
+    }
+
+    @Test
+    void fakeSensorDoesNotFlagBatteryAboveThreshold() {
+        assertFalse(fakeSensorService.hasLowBattery(85.0, 20.0));
+    }
+
+    @Test
+    void fakeReadingUpdatesBinAndStoresHistory() {
         fakeSensorService.sendFakeReading(
                 sensor,
                 bin,
+                triBin,
                 25.5
         );
 
-        // Confirm that the fake reading reached and updated the bin.
-        assertEquals(
-                25.5,
-                bin.getWasteHeight()
+        assertAll(
+                () -> assertEquals(25.5, bin.getWasteHeight(), DELTA),
+                () -> assertEquals(1, historyService.getHistory().size()),
+                () -> assertSame(bin, historyService.lastBin)
+        );
+
+        SensorReading stored = historyService.getHistory().get(0);
+
+        assertAll(
+                () -> assertEquals(sensor.getSensorID(), stored.getSensorID()),
+                () -> assertEquals(25.5, stored.getValue(), DELTA),
+                () -> assertEquals("cm", stored.getUnit())
         );
     }
 
-    /**
-     * Confirms that a complete fake sensor message can travel
-     * through the existing backend flow and update the bin.
-     */
     @Test
-    void completeFakeReadingUpdatesBin() {
-
-        // Create a recycling bin for the simulated reading.
-        Bin bin = new Bin(
-                1,
-                1,
-                Bin.BinType.RECYCLING
-        );
-
-        // Create and assign an ultrasonic sensor.
-        Sensor sensor = new Sensor(
-                101,
-                Sensor.SensorType.ULTRASONIC
-        );
-
-        sensor.assignToBin(bin);
-
-        // Create the fake sensor service.
-        FakeSensorService fakeSensorService =
-                new FakeSensorService();
-
-        // Send a complete fake reading with value, unit, and battery level.
+    void completeFakeReadingUpdatesBinAndStoresHistory() {
         fakeSensorService.sendFakeReading(
                 sensor,
                 bin,
+                triBin,
                 25.5,
                 "cm",
                 85.0
         );
 
-        // Confirm the simulated reading reached the bin.
-        assertEquals(
-                25.5,
-                bin.getWasteHeight()
+        assertAll(
+                () -> assertEquals(25.5, bin.getWasteHeight(), DELTA),
+                () -> assertEquals(1, historyService.getHistory().size()),
+                () -> assertSame(bin, historyService.lastBin)
+        );
+
+        SensorReading stored = historyService.getHistory().get(0);
+
+        assertAll(
+                () -> assertEquals(sensor.getSensorID(), stored.getSensorID()),
+                () -> assertEquals(25.5, stored.getValue(), DELTA),
+                () -> assertEquals("cm", stored.getUnit())
         );
     }
 
+    private static class InMemoryHistoryService extends HistoryService {
+
+        private final List<SensorReading> readings = new ArrayList<>();
+        private Bin lastBin;
+
+        @Override
+        public void addReading(SensorReading reading, Bin bin) {
+            readings.add(reading);
+            lastBin = bin;
+        }
+
+        @Override
+        public List<SensorReading> getHistory() {
+            return List.copyOf(readings);
+        }
+    }
 }

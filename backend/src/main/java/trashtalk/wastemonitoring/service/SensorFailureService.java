@@ -1,4 +1,3 @@
-
 package main.java.trashtalk.wastemonitoring.service;
 
 import main.java.trashtalk.wastemonitoring.model.SensorReading;
@@ -6,8 +5,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 
 /**
- * Checks sensor readings for conditions that may indicate
- * a sensor failure.
+ * Checks sensor readings for conditions that may indicate a sensor failure.
  */
 public class SensorFailureService {
 
@@ -18,16 +16,20 @@ public class SensorFailureService {
             SensorReading reading,
             double binDepth) {
 
+        // A missing sensor reading is considered invalid.
         if (reading == null) {
             return true;
         }
 
-        return reading.getValue() <= 0
-                || reading.getValue() > binDepth;
+        double value = reading.getValue();
+        
+        return !Double.isFinite(value)
+        		|| value < 0
+        		|| value > binDepth;
     }
 
     /**
-     * Checks whether a sensor missed two reporting intervals.
+     * Checks whether a sensor has missed two reporting intervals.
      */
     public boolean hasMissingReading(
             LocalDateTime lastReadingTime,
@@ -43,12 +45,11 @@ public class SensorFailureService {
                         LocalDateTime.now()
                 ).toMinutes();
 
-        return minutesSinceLastReading >=
-                reportingIntervalMinutes * 2L;
+        return minutesSinceLastReading >= reportingIntervalMinutes * 2L;
     }
 
     /**
-     * Checks whether battery level is too low.
+     * Checks whether the sensor battery is at or below the allowed threshold.
      */
     public boolean hasLowBattery(
             double batteryPercent,
@@ -58,7 +59,7 @@ public class SensorFailureService {
     }
 
     /**
-     * Checks all existing sensor failure conditions.
+     * Checks whether any sensor failure condition is present.
      */
     public boolean hasSensorFailure(
             SensorReading reading,
@@ -71,12 +72,14 @@ public class SensorFailureService {
         return hasImpossibleValue(reading, binDepth)
                 || hasMissingReading(
                         lastReadingTime,
-                        reportingIntervalMinutes)
+                        reportingIntervalMinutes
+                )
                 || hasLowBattery(
                         batteryPercent,
-                        batteryThreshold);
+                        batteryThreshold
+                );
     }
-
+    
     /**
      * Detects when a sensor has not reported
      * for a specified number of hours.

@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect, useLayoutEffect, useRef, Fragment, createContext, useContext } from 'react'
 import type { KeyboardEvent, ReactNode, RefObject } from 'react'
 import { divIcon, latLngBounds } from 'leaflet'
-import type { LatLngBounds, LatLngTuple, Layer, Point } from 'leaflet'
-import { MapContainer, TileLayer, ImageOverlay, Pane, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
+import type { LatLngTuple, Point } from 'leaflet'
+import { MapContainer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import Lenis from 'lenis'
 import 'lenis/dist/lenis.css'
@@ -10,11 +10,11 @@ import BinLogo from './BinLogo'
 import Aura from './Aura'
 import LoginPage from './LoginPage'
 import PickupPage from './PickupPage'
-import type { PickupBin, PickupRecord } from './PickupPage'
 import { mockBins } from './data/mockBins'
 import { campusBoundary } from './data/campusBoundary'
-import { campusBuildings } from './data/campusBuildings'
 import HistoryPage from './HistoryPage'
+import ToolsPage from './ToolsPage'
+import { BaseMap, CAMPUS, CampusFog, MAP_LIMIT, mercatorY } from './campusMap'
 
 // fill bands: green 0-49, yellow 50-79, red 80-100
 const WARN_AT = 50
@@ -33,7 +33,8 @@ const TEAL_HEX = '#1B5B65' // teal: selected pin ring, building names
 
 type Role = 'editor' | 'viewer'
 type Status = 'ok' | 'warn' | 'critical' | 'offline'
-type Zone = 'Zone A' | 'Zone B'
+// "Zone A", "Zone B"... editors can make more on the zones map, so any string
+type Zone = string
 type Stream = 'Landfill' | 'Recycling' | 'Compost'
 
 interface Compartment {
@@ -99,9 +100,10 @@ const SAMPLE_CLEAR_BINS: Tribin[] = TRIBINS.map(b => ({
   lastUpdated: b.sensorStatus === 'offline' ? '1 min ago' : b.lastUpdated,
 }))
 
-const ALL_ZONES: Zone[] = [
-    ...new Set(TRIBINS.map(bin => bin.zone))
-]
+// every zone that has bins, A to Z. bins with no zone yet ("") aren't on the dashboards
+function zonesOf(bins: Tribin[]): Zone[] {
+  return [...new Set(bins.map(bin => bin.zone).filter(Boolean))].sort()
+}
 
 // what sets off an alert. everyone picks their own on the settings page
 interface AlertSettings {
@@ -118,7 +120,8 @@ const DEFAULT_ALERT_SETTINGS: AlertSettings = { fillOn: true, fillAt: 80, offlin
 // changes survive a reload), alert settings and pickup records. it's per browser, and can be
 // missing or blocked (private mode), so every read and write is guarded. the backend should own
 // all of this later
-const STORE = { session: 'tt-session', staff: 'tt-staff-v2', alerts: 'tt-alert-settings-v2', pickups: 'tt-pickups-v1' }
+// pickups used to live here too (tt-pickups-v1); the server finds them in the readings now
+const STORE = { session: 'tt-session', staff: 'tt-staff-v2', alerts: 'tt-alert-settings-v2' }
 
 function loadStored<T>(key: string, fallback: T): T {
   try {
@@ -255,95 +258,6 @@ function groupIcon(bins: Tribin[]) {
 
 function binLatLng(bin: Tribin): LatLngTuple {
   return [bin.lat, bin.lng]
-}
-
-function padMeters(bounds: LatLngBounds, meters: number) {
-  const dLat = meters / 111_320
-  const dLng = meters / (111_320 * Math.cos((bounds.getCenter().lat * Math.PI) / 180))
-  return latLngBounds(
-    [bounds.getSouth() - dLat, bounds.getWest() - dLng],
-    [bounds.getNorth() + dLat, bounds.getEast() + dLng],
-  )
-}
-
-// the campus outline, widened to any bin that's ever placed past it.
-// you can pan at most 200 m beyond it
-const CAMPUS = latLngBounds(campusBoundary.map(([lng, lat]): LatLngTuple => [lat, lng]))
-  .extend(latLngBounds(TRIBINS.map(binLatLng)))
-const MAP_LIMIT = padMeters(CAMPUS, 200)
-
-// fog outside the campus outline
-
-// reaches well past MAP_LIMIT so a zoomed-out view never sees its edge
-const FOG_BOUNDS = padMeters(MAP_LIMIT, 2000)
-const FOG_FEATHER_M = 120 // soft edge, in meters, from clear campus to full fog
-const FOG_OPACITY = 0.8
-
-function mercatorY(lat: number) {
-  const r = (lat * Math.PI) / 180
-  return Math.log(Math.tan(Math.PI / 4 + r / 2))
-}
-
-// three passes approximate a gaussian blur
-function boxBlur(src: Float32Array, w: number, h: number, r: number) {
-  const tmp = new Float32Array(src.length)
-  const n = 2 * r + 1
-  const cx = (x: number) => Math.min(w - 1, Math.max(0, x))
-  const cy = (y: number) => Math.min(h - 1, Math.max(0, y))
-  for (let y = 0; y < h; y++) {
-    const row = y * w
-    let sum = 0
-    for (let x = -r; x <= r; x++) sum += src[row + cx(x)]
-    for (let x = 0; x < w; x++) {
-      tmp[row + x] = sum / n
-      sum += src[row + cx(x + r + 1)] - src[row + cx(x - r)]
-    }
-  }
-  for (let x = 0; x < w; x++) {
-    let sum = 0
-    for (let y = -r; y <= r; y++) sum += tmp[cy(y) * w + x]
-    for (let y = 0; y < h; y++) {
-      src[y * w + x] = sum / n
-      sum += tmp[cy(y + r + 1) * w + x] - tmp[cy(y - r) * w + x]
-    }
-  }
-}
-
-// drawn once into an image over FOG_BOUNDS (in web mercator, like the map), then the map
-// scales it like a photo, so panning and zooming cost nothing: clear inside the outline,
-// sage fog outside, feathered between
-let fogUrl: string | undefined
-function fogImage() {
-  if (fogUrl) return fogUrl
-  const west = FOG_BOUNDS.getWest()
-  const top = mercatorY(FOG_BOUNDS.getNorth())
-  const bottom = mercatorY(FOG_BOUNDS.getSouth())
-  const spanX = ((FOG_BOUNDS.getEast() - west) * Math.PI) / 180
-  const w = 1024
-  const h = Math.round((w * (top - bottom)) / spanX)
-  const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
-  const ctx = canvas.getContext('2d')!
-  ctx.beginPath()
-  for (const [lng, lat] of campusBoundary) {
-    ctx.lineTo((((lng - west) * Math.PI) / 180 / spanX) * w, ((top - mercatorY(lat)) / (top - bottom)) * h)
-  }
-  ctx.fill()
-
-  const img = ctx.getImageData(0, 0, w, h)
-  const inside = new Float32Array(w * h)
-  for (let i = 0; i < inside.length; i++) inside[i] = img.data[i * 4 + 3] / 255
-  // feather ~ 10-90% of a gaussian (2.56 sigma), split over 3 box passes
-  const metersPerPx = (spanX * 6_378_137 * Math.cos((CAMPUS.getCenter().lat * Math.PI) / 180)) / w
-  const sigma = FOG_FEATHER_M / 2.56 / metersPerPx
-  const r = Math.max(1, Math.round((Math.sqrt(4 * sigma * sigma + 1) - 1) / 2))
-  for (let pass = 0; pass < 3; pass++) boxBlur(inside, w, h, r)
-  for (let i = 0; i < inside.length; i++) {
-    img.data.set([244, 241, 222, Math.round((1 - inside[i]) * FOG_OPACITY * 255)], i * 4) // ivory
-  }
-  ctx.putImageData(img, 0, 0)
-  return (fogUrl = canvas.toDataURL())
 }
 
 // pins closer than minGap px on screen share one bubble, the picked bin always stands alone
@@ -719,125 +633,6 @@ function BinMapLayers({ bins, fitKey, selectedId, focus, onSelect, onClosePopup,
   )
 }
 
-// base map: openfreemap's positron (free, no key, no limits, osm data), drawn by maplibre
-const VECTOR_STYLE = 'https://tiles.openfreemap.org/styles/positron'
-const VECTOR_CREDIT =
-  '<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> © <a href="https://www.openmaptiles.org/" target="_blank">OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
-const OSM_CREDIT = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-// dotted/dashed clutter: footpaths and their names, rail hatching, admin boundaries
-// positron's gray water and parks, tinted toward the palette: pale teal, pale olive
-const PALETTE_PAINT: Record<string, Record<string, string>> = {
-  water: { 'fill-color': '#C6D6D8' },
-  waterway: { 'line-color': '#C6D6D8' },
-  park: { 'fill-color': '#E2E6D9' },
-  landcover_wood: { 'fill-color': '#E2E6D9' },
-}
-const HIDDEN_LAYERS = new Set([
-  'highway_path', 'highway-name-path',
-  'railway_dashline', 'railway_transit_dashline', 'railway_service_dashline',
-  'boundary_2', 'boundary_3', 'boundary_disputed',
-])
-
-// positron's data has no names for plain campus buildings, so we bring our own (from osm).
-// maplibre hides labels that would collide; bigger buildings claim their spot first.
-// maplibre zooms run one below leaflet's (512px tiles), so 14.5 here is 15.5 in leaflet:
-// one step in from the whole-campus view
-const BUILDING_NAMES_SOURCE = {
-  type: 'geojson',
-  data: {
-    type: 'FeatureCollection',
-    features: campusBuildings.map(b => ({
-      type: 'Feature',
-      properties: { name: b.name, size: b.size },
-      geometry: { type: 'Point', coordinates: [b.lng, b.lat] },
-    })),
-  },
-}
-const BUILDING_NAMES_LAYER = {
-  id: 'campus-building-names',
-  type: 'symbol',
-  source: 'campusBuildings',
-  minzoom: 14.5,
-  layout: {
-    'text-field': ['get', 'name'],
-    'text-font': ['Noto Sans Regular'], // a font positron's glyph server has
-    'text-size': ['interpolate', ['linear'], ['zoom'], 14.5, 10, 17, 13],
-    'text-max-width': 8,
-    'text-padding': 4,
-    'symbol-sort-key': ['-', ['get', 'size']], // lower key places first
-  },
-  paint: {
-    'text-color': TEAL_HEX,
-    'text-halo-color': 'rgba(255, 255, 255, 0.9)',
-    'text-halo-width': 1.5,
-  },
-}
-
-// maplibre + its worker (~420 KB gzipped) are only fetched when map view first opens. if it, the style,
-// or webgl fails, falls back to the plain osm tiles, grayed so the pins still stand out
-function BaseMap() {
-  const map = useMap()
-  const [fallback, setFallback] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    let layer: Layer | undefined
-    const fail = () => {
-      if (layer) map.removeLayer(layer)
-      layer = undefined
-      if (!cancelled) setFallback(true)
-    }
-    Promise.all([
-      import('maplibre-gl'),
-      // maplibre finds its worker next to its own file at runtime, which vite neither
-      // bundles nor keeps in place; ?worker&url makes vite bundle it and hand us the url
-      import('maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'),
-      import('@maplibre/maplibre-gl-leaflet'),
-      import('maplibre-gl/dist/maplibre-gl.css'),
-      fetch(VECTOR_STYLE).then(r => (r.ok ? r.json() : Promise.reject(r.status))),
-    ])
-      .then(([maplibre, { default: workerUrl }, { maplibreGL }, , style]) => {
-        if (cancelled) return
-        maplibre.setWorkerUrl(workerUrl)
-        // hide before first paint rather than after load, so the clutter never flashes
-        for (const l of style.layers) {
-          if (HIDDEN_LAYERS.has(l.id)) l.layout = { ...l.layout, visibility: 'none' }
-          if (l.id in PALETTE_PAINT) l.paint = { ...l.paint, ...PALETTE_PAINT[l.id] }
-        }
-        style.sources.campusBuildings = BUILDING_NAMES_SOURCE
-        style.layers.push(BUILDING_NAMES_LAYER)
-        layer = maplibreGL({ style, attributionControl: { customAttribution: VECTOR_CREDIT } }).addTo(map)
-        const gl = (layer as ReturnType<typeof maplibreGL>).getMaplibreMap()
-        let loaded = false
-        gl.once('load', () => { loaded = true })
-        gl.on('error', () => { if (!loaded) fail() })
-      })
-      .catch(fail)
-    return () => {
-      cancelled = true
-      if (layer) map.removeLayer(layer)
-    }
-  }, [map])
-
-  return fallback ? (
-    <TileLayer
-      url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-      maxZoom={MAX_ZOOM}
-      attribution={OSM_CREDIT}
-      className="[filter:grayscale(.85)_brightness(1.05)_contrast(.9)]"
-    />
-  ) : null
-}
-
-// the fog sits in its own pane between the base map and the pins, so pins and cards stay sharp
-function CampusFog() {
-  return (
-    <Pane name="campusFog" style={{ zIndex: 450 }}>
-      <ImageOverlay url={fogImage()} bounds={FOG_BOUNDS} />
-    </Pane>
-  )
-}
-
 // fades out while a bin card is open: leaflet stacks pins and popups in one pane,
 // so the legend can't sit between them and would cover the card
 function MapLegend({ hidden }: { hidden: boolean }) {
@@ -889,7 +684,7 @@ function BinMap(props: BinMapProps) {
 
 // pages and navigation
 
-type Page = 'summary' | 'details' | 'pickup' | 'history' | 'admin'
+type Page = 'summary' | 'details' | 'pickup' | 'history' | 'tools' | 'admin'
 
 // tabler icons (MIT, tabler.io/icons), inlined like the app's other svgs
 const ICONS = {
@@ -903,6 +698,7 @@ const ICONS = {
   circleCheck: <><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" /><path d="M9 12l2 2l4 -4" /></>,
   arrowRight: <><path d="M5 12l14 0" /><path d="M13 18l6 -6" /><path d="M13 6l6 6" /></>,
   arrowLeft: <><path d="M5 12l14 0" /><path d="M5 12l6 6" /><path d="M5 12l6 -6" /></>,
+  flask: <><path d="M9 3l6 0" /><path d="M10 9l4 0" /><path d="M10 3v6l-4 11a.7 .7 0 0 0 .5 1h11a.7 .7 0 0 0 .5 -1l-4 -11v-6" /></>,
 }
 
 function Icon({ name, size = 20 }: { name: keyof typeof ICONS; size?: number }) {
@@ -918,6 +714,7 @@ const NAV_ITEMS: { page: Page; label: string; icon: keyof typeof ICONS; editorsO
   { page: 'details', label: 'Details', icon: 'layoutGrid' },
   { page: 'pickup', label: 'Pickup List', icon: 'listCheck' },
   { page: 'history', label: 'History', icon: 'chartLine' },
+  { page: 'tools', label: 'Editor tools', icon: 'flask', editorsOnly: true },
   { page: 'admin', label: 'Settings', icon: 'settings' },
 ]
 
@@ -1343,8 +1140,9 @@ function SummaryPage({
 
 // role and zone controls for one person, shared by the admin table and the phone cards.
 // nobody can change their own role, and only editors reach admin, so an editor always remains
-function StaffEditor({ member, isSelf, onToggleRole, onToggleZone }: {
+function StaffEditor({ member, zones, isSelf, onToggleRole, onToggleZone }: {
   member: StaffMember
+  zones: Zone[]
   isSelf: boolean
   onToggleRole: () => void
   onToggleZone: (zone: Zone) => void
@@ -1370,7 +1168,7 @@ function StaffEditor({ member, isSelf, onToggleRole, onToggleZone }: {
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="w-14 text-[13px] font-bold text-pine-muted">Zones</span>
-        {ALL_ZONES.map(zone => {
+        {zones.map(zone => {
           const on = member.zones.includes(zone)
           return (
             <button
@@ -1528,7 +1326,6 @@ export default function App() {
   const alertThreshold = alertSettings.fillAt
   const setAlertThreshold = (next: number | ((t: number) => number)) =>
     setAlertSettings(prev => ({ ...prev, fillAt: typeof next === 'function' ? next(prev.fillAt) : next }))
-  const [pickups, setPickups] = useState<PickupRecord[]>(() => loadStoredList(STORE.pickups, []))
   const [pickupZone, setPickupZone] = useState<string>('All')
   const [dismissedIds, setDismissedIds] = useState<string[]>([])
   const [selectedBin, setSelectedBin] = useState<Tribin | null>(null)
@@ -1538,8 +1335,6 @@ export default function App() {
 
   useEffect(() => { saveStored(STORE.staff, staffList) }, [staffList])
   useEffect(() => { saveStored(STORE.alerts, alertSettingsByUser) }, [alertSettingsByUser])
-  // only keep the last two weeks of pickups in the browser
-  useEffect(() => { saveStored(STORE.pickups, pickups.filter(p => Date.now() - p.at < 14 * 24 * 60 * 60 * 1000)) }, [pickups])
   useEffect(() => {
     try {
       if (sessionId) localStorage.setItem(STORE.session, sessionId)
@@ -1549,6 +1344,10 @@ export default function App() {
     }
   }, [sessionId])
   const [apiBins, setApiBins] = useState<Tribin[]>(TRIBINS)
+  // false while the site is showing mockBins because the server isn't answering
+  const [apiLive, setApiLive] = useState(false)
+  // lets the editor tools refresh the bins right after a change instead of waiting for the poll
+  const refreshBinsRef = useRef<() => void>(() => {})
 
   // Poll the local Java API so simulated sensor readings show up automatically.
   // If the backend is unavailable, the site keeps its existing mock bins.
@@ -1557,22 +1356,37 @@ export default function App() {
     const refreshMs = 5000 // five-second demo display refresh
     let active = true
     let requestInProgress = false
+    // a test panel button can ask for a refresh while a poll is mid-flight. that poll may have
+    // started before the change, so run one more right after it instead of dropping the ask
+    let refreshAgain = false
 
     async function refreshBins() {
-      if (requestInProgress) return
+      if (requestInProgress) {
+        refreshAgain = true
+        return
+      }
       requestInProgress = true
       try {
         const response = await fetch(`${apiUrl}/api/tribins`, { cache: 'no-store' })
         if (!response.ok) throw new Error('Failed to load bins')
         const data: Tribin[] = await response.json()
-        if (active) setApiBins(data)
+        if (active) {
+          setApiBins(data)
+          setApiLive(true)
+        }
       } catch {
         // Expected when the local backend isn't running: keep sample data.
+        if (active) setApiLive(false)
       } finally {
         requestInProgress = false
+        if (refreshAgain && active) {
+          refreshAgain = false
+          void refreshBins()
+        }
       }
     }
 
+    refreshBinsRef.current = () => { void refreshBins() }
     void refreshBins()
     const timer = window.setInterval(() => { void refreshBins() }, refreshMs)
     return () => { active = false; window.clearInterval(timer) }
@@ -1585,7 +1399,9 @@ export default function App() {
   const currentUser = signedInUser ?? staffList[0]
   const currentUserId = currentUser.id
   const currentRole = currentUser.role
-  const visibleZones = currentRole === 'editor' ? ALL_ZONES : ALL_ZONES.filter(z => currentUser.zones.includes(z))
+  // zones come from the bins themselves, so a zone made on the zones map shows up everywhere
+  const allZones = useMemo(() => zonesOf(apiBins), [apiBins])
+  const visibleZones = currentRole === 'editor' ? allZones : allZones.filter(z => currentUser.zones.includes(z))
   const zonesKey = visibleZones.join()
   const sampleData = currentUserId === SAMPLE_USER_ID
   const myBins = useMemo(
@@ -1634,6 +1450,11 @@ export default function App() {
     setMapBinId(null)
     setSelectedBin(null)
   }, [currentUserId, zonesKey])
+
+  // editor tools aren't there for viewers (e.g. after switching to a viewer from the account menu)
+  useEffect(() => {
+    if (currentRole !== 'editor' && page === 'tools') setPage('summary')
+  }, [currentRole, page])
 
   // scroll after render, and only when the target isn't fully on screen. in map view the target
   // is the map itself, so a jumped-to pin (aimed low in the map) clears the floating tab bar
@@ -1766,20 +1587,6 @@ export default function App() {
   function openPickups(zone: Zone | 'All') {
     setPickupZone(zone)
     setPage('pickup')
-  }
-
-  function markEmptied(bin: PickupBin) {
-    const top = bin.compartments.reduce((a, b) => (b.fill > a.fill ? b : a))
-    setPickups(prev => [...prev, {
-      id: `${bin.id}-${Date.now()}`,
-      binId: bin.id, binName: bin.name, zone: bin.zone, location: bin.location,
-      stream: top.label, fill: top.fill,
-      byId: currentUser.id, byName: currentUser.name, at: Date.now(),
-    }])
-  }
-
-  function undoPickup(recordId: string) {
-    setPickups(prev => prev.filter(p => p.id !== recordId))
   }
 
   // straight to the top, through the smooth scroller so the two never disagree
@@ -1917,9 +1724,6 @@ export default function App() {
               zoneFilter={pickupZone}
               onZoneFilter={setPickupZone}
               threshold={alertThreshold}
-              pickups={pickups.filter(p => visibleZones.includes(p.zone as Zone))}
-              onEmptied={markEmptied}
-              onUndo={undoPickup}
               onShowOnMap={showOnMap}
             />
           )}
@@ -2105,6 +1909,19 @@ export default function App() {
             </>
           )}
 
+          {page === 'tools' && currentRole === 'editor' && (
+            <ToolsPage
+              bins={myBins}
+              allBins={apiBins}
+              fillOn={alertSettings.fillOn}
+              fillAt={alertThreshold}
+              offlineOn={alertSettings.offlineOn}
+              usingSampleData={!apiLive}
+              onChanged={() => refreshBinsRef.current()}
+              onScrollTop={scrollToTop}
+            />
+          )}
+
           {/* manage tab */}
           {page === 'admin' && currentRole === 'editor' && (
             <div className="space-y-5 md:space-y-6">
@@ -2144,6 +1961,7 @@ export default function App() {
                         <div className="mt-4 pt-4 border-t border-pine/[0.07]">
                           <StaffEditor
                             member={member}
+                            zones={allZones}
                             isSelf={member.id === currentUserId}
                             onToggleRole={() => toggleStaffRole(member.id)}
                             onToggleZone={zone => toggleZoneAssignment(member.id, zone)}
@@ -2217,6 +2035,7 @@ export default function App() {
                               <div className="bg-ivory/65 rounded-[20px] px-5 py-4">
                                 <StaffEditor
                                   member={member}
+                                  zones={allZones}
                                   isSelf={member.id === currentUserId}
                                   onToggleRole={() => toggleStaffRole(member.id)}
                                   onToggleZone={zone => toggleZoneAssignment(member.id, zone)}
