@@ -187,33 +187,6 @@ public final class FakeSensorScheduler implements AutoCloseable {
                 );
                 count++;
             }
-            triBin.setLastUpdated(now);
-        }
-
-        // GatewayDataService updates Bin objects in memory, but the API reads
-        // from the database. Persist those results so the dashboard sees them.
-        binRepository.saveSimulatedReadings(triBins);
-
-        // Check for missing sensor readings when enabled.
-        if ("true".equalsIgnoreCase(
-                System.getenv("SENSOR_FAILURE_CHECK_ENABLED"))) {
-
-            String setting = System.getenv("SENSOR_FAILURE_HOURS");
-
-            long thresholdHours =
-                    setting == null || setting.isBlank()
-                            ? 3L
-                            : Long.parseLong(setting);
-
-            int failedCount =
-                    binRepository.refreshSensorFailureStatuses(
-                            thresholdHours,
-                            now
-                    );
-
-            System.out.println(
-                    "Sensors flagged as failed: " + failedCount
-            );
         }
 
         System.out.println("Fake sensor tick: " + count + " readings at " + now);
