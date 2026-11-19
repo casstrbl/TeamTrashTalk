@@ -1,4 +1,5 @@
 package main.java.trashtalk.wastemonitoring;
+import main.java.trashtalk.wastemonitoring.controller.SystemCheckController;
 
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -13,6 +14,12 @@ import main.java.trashtalk.wastemonitoring.database.DatabaseViewer;
 import main.java.trashtalk.wastemonitoring.service.HistoryCsvService;
 import main.java.trashtalk.wastemonitoring.service.HistoryService;
 import main.java.trashtalk.wastemonitoring.service.LoginService;
+import main.java.trashtalk.wastemonitoring.controller.TriBinManagementController;
+import main.java.trashtalk.wastemonitoring.controller.SensorReadingController;
+import main.java.trashtalk.wastemonitoring.service.GatewayDataService;
+import main.java.trashtalk.wastemonitoring.repository.BinRepository;
+
+import java.util.Map;
 
 public class Application {
 
@@ -64,6 +71,28 @@ public class Application {
 					new LoginController(loginService)
 			);
 
+			// Connect /api/system-check to the SystemCheckController.
+			server.createContext(
+					"/api/system-check",
+					new SystemCheckController(loginService)
+			);
+
+			// Connect editor-only TriBin management endpoints.
+			server.createContext(
+					"/api/admin/tribins",
+					new TriBinManagementController(loginService)
+			);
+
+			// Register the LoRaWAN webhook handler at /api/sensor-readings.
+			server.createContext(
+			        SensorReadingController.PATH,
+			        new SensorReadingController(
+			                new GatewayDataService(historyService),
+			                new BinRepository(),
+			                Map.of("YOUR_DEVICE_ID",
+			                        new SensorReadingController.SensorAssignment(
+			                                1, 2, 201, 74.5)),
+			                System.getenv("SENSOR_WEBHOOK_TOKEN")));
 			// Start the server
 			server.start();
 
