@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { latLngBounds } from 'leaflet'
 import type { LatLng, LatLngBounds, LeafletMouseEvent } from 'leaflet'
-import { MapContainer, TileLayer, CircleMarker, Rectangle, Tooltip, useMap } from 'react-leaflet'
+import { MapContainer, CircleMarker, Pane, Rectangle, Tooltip, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import { apiRequest, triBinNumber } from './api'
+import { BaseMap, CAMPUS, CampusFog, MAP_LIMIT, MAX_ZOOM } from './campusMap'
 import type { ToolBin } from './TestPanelPage'
 
 // zones map (editors): drag on the map to draw an area, drag the area to move it, drag a corner to
@@ -11,8 +12,6 @@ import type { ToolBin } from './TestPanelPage'
 // letter. "edit a zone" opens a zone's area so you can move or resize it, and saving keeps exactly the
 // bins inside. the client liked making zones by picking bins or by lat/long, this does both
 
-const OSM_CREDIT = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-const CAMPUS: [[number, number], [number, number]] = [[38.5525, -121.4300], [38.5665, -121.4175]]
 
 // a color per zone letter, from the site's palette. no zone yet = gray
 const ZONE_COLORS = ['#1B5B65', '#798F53', '#C88582', '#D4A13A', '#4A4A42', '#5B8FA0', '#8E6C9E', '#B4463F']
@@ -164,6 +163,18 @@ function padArea(b: LatLngBounds) {
   return latLngBounds([c.lat - halfLat, c.lng - halfLng], [c.lat + halfLat, c.lng + halfLng]).pad(0.15)
 }
 
+// same as the bin map: you can't zoom out past the whole campus (depends on the map's size)
+function CampusMinZoom() {
+  const map = useMap()
+  useEffect(() => {
+    const fit = () => map.setMinZoom(map.getBoundsZoom(CAMPUS))
+    fit()
+    map.on('resize', fit)
+    return () => { map.off('resize', fit) }
+  }, [map])
+  return null
+}
+
 function fmt(n: number) {
   return n.toFixed(5)
 }
@@ -198,7 +209,7 @@ export default function ZonesMap({ bins, onChanged }: { bins: ToolBin[]; onChang
   }), [letters, placed])
 
   const initialBounds = useMemo(() => {
-    if (placed.length === 0) return latLngBounds(CAMPUS)
+    if (placed.length === 0) return CAMPUS
     return latLngBounds(placed.map(b => [b.lat, b.lng] as [number, number])).pad(0.05)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps -- only the first view
 
@@ -314,10 +325,15 @@ export default function ZonesMap({ bins, onChanged }: { bins: ToolBin[]; onChang
         </p>
       </div>
 
-      <div data-lenis-prevent className="h-[420px] md:h-[520px] rounded-[28px] overflow-hidden border border-pine/10 glass">
-        <MapContainer bounds={initialBounds} maxZoom={19} className="h-full w-full" scrollWheelZoom>
-          <TileLayer url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" maxZoom={19} attribution={OSM_CREDIT} className="[filter:grayscale(.85)_brightness(1.05)_contrast(.9)]" />
+      <div data-lenis-prevent className="relative isolate h-[420px] md:h-[520px] rounded-[28px] overflow-hidden border border-pine/10 glass">
+        {/* same base map, fog and limits as the bin map, so it stays on campus */}
+        <MapContainer bounds={initialBounds} maxZoom={MAX_ZOOM} maxBounds={MAP_LIMIT} maxBoundsViscosity={1} className="h-full w-full" scrollWheelZoom>
+          <BaseMap />
+          <CampusFog />
+          <CampusMinZoom />
           <AreaTool drawing={drawing} area={area} bins={placed} onArea={changeArea} onDone={() => setDrawing(false)} onTapBin={toggle} />
+          {/* above the fog (450) so areas and bins near the campus edge stay sharp */}
+          <Pane name="zoneShapes" style={{ zIndex: 500 }}>
           {zoneAreas.filter(z => z.letter !== editing).map(z => (
             <Rectangle key={z.letter} bounds={z.bounds} pathOptions={{ color: zoneColor(z.letter), weight: 1.5, dashArray: '2 6', fill: true, fillColor: zoneColor(z.letter), fillOpacity: 0.05 }} interactive={false} />
           ))}
@@ -340,6 +356,7 @@ export default function ZonesMap({ bins, onChanged }: { bins: ToolBin[]; onChang
               </CircleMarker>
             )
           })}
+          </Pane>
         </MapContainer>
       </div>
 

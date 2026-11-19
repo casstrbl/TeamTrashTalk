@@ -48,6 +48,26 @@ interface TimerStatus {
 // the pickup list logs a pickup when a compartment that was at least this full reads almost empty
 const PICKUP_FROM = 50
 
+// the bin picker's two extra choices
+const ALL = '__all'
+const RANDOM = '__random'
+// how many bins "all bins" works on at once, so the server isn't hit with every request together
+const BATCH = 4
+
+// runs fn on every item, a few at a time. returns how many worked and the first error message
+async function forEachBin<T>(items: T[], fn: (item: T) => Promise<unknown>) {
+  let ok = 0
+  let firstError = ''
+  for (let i = 0; i < items.length; i += BATCH) {
+    const results = await Promise.allSettled(items.slice(i, i + BATCH).map(fn))
+    for (const r of results) {
+      if (r.status === 'fulfilled') ok++
+      else if (!firstError) firstError = r.reason instanceof Error ? r.reason.message : 'Something went wrong.'
+    }
+  }
+  return { ok, failed: items.length - ok, firstError }
+}
+
 const STREAMS: Stream[] = ['Landfill', 'Recycling', 'Compost']
 
 // matches the fill bands everywhere else: green 0-49, yellow 50-79, red 80-100
@@ -116,8 +136,26 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
     return () => { active = false; window.clearInterval(id) }
   }, [])
 
+  // the last bin "random bin" landed on, so its levels show at the top
+  const [lastRandomId, setLastRandomId] = useState<string | null>(null)
+  const mode = binId === ALL ? 'all' : binId === RANDOM ? 'random' : 'one'
+
   // the picked bin can disappear (zone change, reset); fall back to the first one
-  const bin = sorted.find(b => b.id === binId) ?? sorted[0]
+  const bin = mode === 'one'
+    ? sorted.find(b => b.id === binId) ?? sorted[0]
+    : mode === 'random' ? sorted.find(b => b.id === lastRandomId) ?? null : null
+
+  // which bins a button press works on: the picked one, every bin, or one picked at random right now
+  function targets(): ToolBin[] {
+    if (mode === 'all') return sorted
+    if (mode === 'random') {
+      const pick = sorted[Math.floor(Math.random() * sorted.length)]
+      if (!pick) return []
+      setLastRandomId(pick.id)
+      return [pick]
+    }
+    return bin ? [bin] : []
+  }
 
   // a second tap within a few seconds confirms the reset
   useEffect(() => {
@@ -143,34 +181,71 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
     }
   }
 
+  // one button press on every bin (all bins): one summary line instead of one per bin
+  async function runAll(action: Action, list: ToolBin[], path: string, bodyFor: (b: ToolBin) => object, done: string) {
+    setBusy(action)
+    try {
+      const { ok, failed, firstError } = await forEachBin(list, b => apiRequest<SimResult>(`/api/simulate/${path}`, 'POST', bodyFor(b)))
+      if (ok > 0) addLog(`${done.replace('{n}', String(ok))}${failed ? ` (${failed} didn’t work: ${firstError})` : ''}`, failed === 0)
+      else addLog(firstError || 'Something went wrong.', false)
+      onChanged()
+    } finally {
+      setBusy(null)
+    }
+  }
+
   function fill() {
-    if (!bin) return
-    run('fill', 'fill', { triBinID: triBinNumber(bin.id), stream: stream.toLowerCase(), percent }, () => {
-      const base = `${bin.name} ${stream.toLowerCase()} set to ${percent}%`
+    const list = targets()
+    if (list.length === 0) return
+    const what = `${stream.toLowerCase()} set to ${percent}%`
+    const alertNote = !fillOn ? 'fill alerts are off in your settings' : percent >= fillAt ? 'alerts sent' : `below your ${fillAt}% alert level, no alerts`
+    if (list.length > 1) {
+      return runAll('fill', list, 'fill', b => ({ triBinID: triBinNumber(b.id), stream: stream.toLowerCase(), percent }), `{n} bins ${what} → ${alertNote}`)
+    }
+    const one = list[0]
+    run('fill', 'fill', { triBinID: triBinNumber(one.id), stream: stream.toLowerCase(), percent }, () => {
+      const base = `${one.name} ${what}`
       if (!fillOn) return `${base} → fill alerts are off in your settings`
       return percent >= fillAt ? `${base} → alert sent` : `${base} → below your ${fillAt}% alert level, no alert`
     })
   }
 
   function empty() {
-    if (!bin) return
-    const fullestBefore = Math.max(...bin.compartments.map(c => c.fill))
-    run('empty', 'empty', { triBinID: triBinNumber(bin.id) }, res => {
-      const base = `${bin.name} emptied → all compartments at ${res.fullest ?? 2}%`
+    const list = targets()
+    if (list.length === 0) return
+    if (list.length > 1) {
+      const pickups = list.filter(b => Math.max(...b.compartments.map(c => c.fill)) >= PICKUP_FROM).length
+      return runAll('empty', list, 'empty', b => ({ triBinID: triBinNumber(b.id) }), `{n} bins emptied → ${pickups} ${pickups === 1 ? 'pickup' : 'pickups'} logged`)
+    }
+    const one = list[0]
+    const fullestBefore = Math.max(...one.compartments.map(c => c.fill))
+    run('empty', 'empty', { triBinID: triBinNumber(one.id) }, res => {
+      const base = `${one.name} emptied → all compartments at ${res.fullest ?? 2}%`
       return fullestBefore >= PICKUP_FROM ? `${base}, pickup logged` : `${base} (under ${PICKUP_FROM}% before, so no pickup logged)`
     })
   }
 
   function offline() {
-    if (!bin) return
-    run('offline', 'offline', { triBinID: triBinNumber(bin.id) }, () =>
-      `${bin.name} sensor went offline → ${offlineOn ? 'offline alert sent' : 'offline alerts are off in your settings'}`)
+    const list = targets()
+    if (list.length === 0) return
+    const note = offlineOn ? 'offline alerts sent' : 'offline alerts are off in your settings'
+    if (list.length > 1) {
+      return runAll('offline', list, 'offline', b => ({ triBinID: triBinNumber(b.id) }), `{n} sensors went offline → ${note}`)
+    }
+    const one = list[0]
+    run('offline', 'offline', { triBinID: triBinNumber(one.id) }, () =>
+      `${one.name} sensor went offline → ${offlineOn ? 'offline alert sent' : 'offline alerts are off in your settings'}`)
   }
 
   function demoWeek() {
-    if (!bin) return
-    run('week', 'demo-week', { triBinID: triBinNumber(bin.id) }, res =>
-      `${bin.name} got a week of demo readings${res.readingsAdded ? ` (${res.readingsAdded})` : ''} → see them on the History page`)
+    const list = targets()
+    if (list.length === 0) return
+    if (list.length > 1) {
+      return runAll('week', list, 'demo-week', b => ({ triBinID: triBinNumber(b.id) }), '{n} bins got a week of demo readings → see them on the History page')
+    }
+    const one = list[0]
+    run('week', 'demo-week', { triBinID: triBinNumber(one.id) }, res =>
+      `${one.name} got a week of demo readings${res.readingsAdded ? ` (${res.readingsAdded})` : ''} → see them on the History page`)
   }
 
   function reset() {
@@ -211,7 +286,7 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
     }
   }
 
-  if (!bin) {
+  if (sorted.length === 0) {
     return (
       <div className="rounded-[28px] p-8 glass text-center">
         <p className="text-lg font-bold text-pine">No bins to test yet</p>
@@ -220,7 +295,12 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
     )
   }
 
-  const offlineNow = bin.sensorStatus === 'offline'
+  const offlineNow = mode === 'one' && bin?.sensorStatus === 'offline'
+  const onlineCount = sorted.filter(b => b.sensorStatus === 'online').length
+  const fullestBin = sorted.reduce<ToolBin | null>((best, b) => {
+    const f = Math.max(...b.compartments.map(c => c.fill))
+    return !best || f > Math.max(...best.compartments.map(c => c.fill)) ? b : best
+  }, null)
 
   return (
     <div className="space-y-5 md:space-y-6">
@@ -230,18 +310,33 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
           <label className="flex-1 min-w-0">
             <span className="block text-sm font-bold text-pine mb-1.5">Bin to test</span>
             <select
-              value={bin.id}
+              value={mode === 'one' && bin ? bin.id : binId}
               onChange={e => setBinId(e.target.value)}
               className="w-full min-h-12 rounded-2xl bg-white/70 border border-pine/10 px-4 text-base font-semibold text-pine outline-none focus:border-teal/50 focus:ring-2 focus:ring-teal/20"
             >
-              {sorted.map(b => <option key={b.id} value={b.id}>{b.name} · {b.location}</option>)}
+              <option value={ALL}>All bins ({sorted.length})</option>
+              <option value={RANDOM}>Random bin (a new one each press)</option>
+              <optgroup label="One bin">
+                {sorted.map(b => <option key={b.id} value={b.id}>{b.name} · {b.location}</option>)}
+              </optgroup>
             </select>
           </label>
-          <span className={`self-start md:self-auto text-xs font-bold px-3 py-1.5 rounded-full ${offlineNow ? 'bg-offline-soft text-status-offline-ink' : 'bg-olive-soft text-olive-ink'}`}>
-            {offlineNow ? 'Sensor offline' : 'Sensor online'} · {bin.lastUpdated}
-          </span>
+          {bin && (
+            <span className={`self-start md:self-auto text-xs font-bold px-3 py-1.5 rounded-full ${bin.sensorStatus === 'offline' ? 'bg-offline-soft text-status-offline-ink' : 'bg-olive-soft text-olive-ink'}`}>
+              {mode === 'random' ? `Last pick: ${bin.name} · ` : ''}{bin.sensorStatus === 'offline' ? 'Sensor offline' : 'Sensor online'} · {bin.lastUpdated}
+            </span>
+          )}
         </div>
-        <div className="grid grid-cols-3 gap-2 sm:gap-3 mt-4">
+        {mode === 'all' && (
+          <p className="text-sm font-semibold text-pine-muted mt-4">
+            Buttons below work on all {sorted.length} bins on your dashboard. {onlineCount} {onlineCount === 1 ? 'sensor is' : 'sensors are'} online
+            {fullestBin ? `, and the fullest is ${fullestBin.name} at ${Math.max(...fullestBin.compartments.map(c => c.fill))}%` : ''}.
+          </p>
+        )}
+        {mode === 'random' && !bin && (
+          <p className="text-sm font-semibold text-pine-muted mt-4">Each button press picks a random bin, and its levels show up here.</p>
+        )}
+        {bin && <div className="grid grid-cols-3 gap-2 sm:gap-3 mt-4">
           {bin.compartments.map(c => (
             <div key={c.label} className="bg-ivory/75 rounded-2xl px-3 py-2.5">
               <div className="flex justify-between text-xs font-semibold text-pine-muted">
@@ -253,7 +348,7 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
               </div>
             </div>
           ))}
-        </div>
+        </div>}
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -274,18 +369,18 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
         </ActionTile>
 
         <ActionTile step="2" title="Empty bin" text="Simulate a collection. Every compartment drops to near empty, and the pickup is logged automatically.">
-          <button onClick={empty} disabled={busy !== null} className={BUTTON}>{busy === 'empty' ? 'Sending…' : 'Empty bin'}</button>
+          <button onClick={empty} disabled={busy !== null} className={BUTTON}>{busy === 'empty' ? 'Sending…' : mode === 'all' ? 'Empty all bins' : 'Empty bin'}</button>
         </ActionTile>
 
         <ActionTile step="3" title="Take sensor offline" text="Simulate a sensor that stops reporting. An offline alert is raised.">
           <button onClick={offline} disabled={busy !== null || offlineNow} className={BUTTON}>
-            {busy === 'offline' ? 'Sending…' : offlineNow ? 'Sensor is offline' : 'Take sensor offline'}
+            {busy === 'offline' ? 'Sending…' : offlineNow ? 'Sensor is offline' : mode === 'all' ? 'Take all sensors offline' : 'Take sensor offline'}
           </button>
           {offlineNow && <p className="text-xs font-semibold text-pine-muted mt-2 text-center">A new fill or empty reading brings it back online.</p>}
         </ActionTile>
 
-        <ActionTile step="4" title="Add demo history" text="Generate 7 days of hourly readings for this bin's History chart and CSV export.">
-          <button onClick={demoWeek} disabled={busy !== null} className={BUTTON}>{busy === 'week' ? 'Adding…' : 'Add 7 days of readings'}</button>
+        <ActionTile step="4" title="Add demo history" text="Generate 7 days of hourly readings for the History chart and CSV export.">
+          <button onClick={demoWeek} disabled={busy !== null} className={BUTTON}>{busy === 'week' ? 'Adding…' : mode === 'all' ? 'Add 7 days to every bin' : 'Add 7 days of readings'}</button>
         </ActionTile>
 
         <ActionTile
