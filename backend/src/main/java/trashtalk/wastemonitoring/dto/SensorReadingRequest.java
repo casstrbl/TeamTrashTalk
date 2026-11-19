@@ -1,5 +1,6 @@
 package main.java.trashtalk.wastemonitoring.dto;
 import java.time.LocalDateTime;
+import java.util.Objects;
 
 /**
  * Represents incoming sensor data that can be received by the API.
@@ -79,7 +80,7 @@ public class SensorReadingRequest {
             int sensorID,
             double value,
             String unit,
-            double batteryLevel) {
+            Double batteryLevel) {
 
         this.binID = binID;
         this.sensorID = sensorID;
@@ -87,6 +88,17 @@ public class SensorReadingRequest {
         this.unit = unit;
         this.batteryLevel = batteryLevel;
         this.timestamp = LocalDateTime.now();
+    }
+    
+    
+    public SensorReadingRequest(
+    		int binID, int sensorID, double value, String unit, Double batteryLevel, LocalDateTime timestamp) {
+    	this.binID = binID;
+    	this.sensorID = sensorID;
+    	this.value = value;
+    	this.unit = unit;
+    	this.batteryLevel = batteryLevel;
+    	this.timestamp = Objects.requireNonNull(timestamp, "timestamp");
     }
 
     // Retrieves the sensor ID.
@@ -109,7 +121,7 @@ public class SensorReadingRequest {
      *
      * @return sensor battery percentage
      */
-    public double getBatteryLevel() {
+    public Double getBatteryLevel() {
         return batteryLevel;
     }
 
