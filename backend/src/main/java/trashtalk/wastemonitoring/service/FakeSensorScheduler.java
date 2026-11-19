@@ -197,8 +197,14 @@ public final class FakeSensorScheduler implements AutoCloseable {
                 double simulatedHeightCm = withSensorNoise(trueCm, random);
 
                 // Reuse the team's existing simulated reading / gateway path.
-                fakeSensorService.sendFakeReading(sensor, bin,
-                        simulatedHeightCm, "cm", triBin.getBattery());
+                fakeSensorService.sendFakeReading(
+                        sensor,
+                        bin,
+                        triBin,
+                        simulatedHeightCm,
+                        "cm",
+                        triBin.getBattery()
+                );
                 count++;
             }
             triBin.setLastUpdated(now);

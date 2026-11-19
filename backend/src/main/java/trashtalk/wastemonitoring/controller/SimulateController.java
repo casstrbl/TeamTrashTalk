@@ -195,7 +195,9 @@ public class SimulateController implements HttpHandler {
         Sensor sensor = new Sensor(bin.getBinID(), Sensor.SensorType.ULTRASONIC);
         sensor.assignToBin(bin);
         double heightCm = percent / 100.0 * Bin.BIN_HEIGHT;
-        fakeSensorService.sendFakeReading(sensor, bin, heightCm, "cm", triBin.getBattery());
+        // a bin that never reported has battery 0, so test readings come in with a full battery
+        int battery = triBin.getBattery() > 0 ? triBin.getBattery() : 100;
+        fakeSensorService.sendFakeReading(sensor, bin, triBin, heightCm, "cm", battery);
     }
 
     // the gateway updates bins in memory, so save them like the fake sensor timer does
