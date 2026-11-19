@@ -4,6 +4,7 @@
 export const API_URL: string = import.meta.env.VITE_API_URL ?? ''
 
 const TOKEN_KEY = 'tt-server-token'
+export const SIGNED_OUT_EVENT = 'tt-server-signed-out'
 
 export interface ServerProfile {
   id: number
@@ -85,8 +86,12 @@ export async function apiRequest<T>(path: string, method: 'GET' | 'POST' | 'PUT'
   }
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    if (res.status === 401 || res.status === 403) clearServerLogin()
-    if (res.status === 401) throw new ApiError('Your server sign-in expired. Sign out and sign in again.', 401)
+    if (res.status === 401 || res.status === 403) {
+      clearServerLogin()
+      // editor tools listen for this and bring the sign-in card back
+      window.dispatchEvent(new Event(SIGNED_OUT_EVENT))
+    }
+    if (res.status === 401) throw new ApiError('Your server sign-in expired. Please sign in again.', 401)
     throw new ApiError(data.error ?? (res.status === 403 ? 'This needs an editor account.' : 'Something went wrong.'), res.status)
   }
   return data as T

@@ -5,7 +5,7 @@ import type { ServerProfile } from './api'
 
 // shown on editor tools until there's a server login. the dashboard sign-in is still the browser
 // demo, so these buttons need a real editor account on the server
-export default function ServerSignIn({ onSignedIn }: { onSignedIn: (staff: ServerProfile) => void }) {
+export default function ServerSignIn({ notice = '', onSignedIn }: { notice?: string; onSignedIn: (staff: ServerProfile) => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -48,6 +48,7 @@ export default function ServerSignIn({ onSignedIn }: { onSignedIn: (staff: Serve
         <span className="block text-sm font-bold text-pine mb-1.5">Password</span>
         <input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Your password" className={input} />
       </label>
+      {notice && !error && <p role="status" className="text-sm font-semibold text-status-warn-ink bg-warn-soft rounded-2xl px-4 py-3">{notice}</p>}
       {error && <p role="alert" className="text-sm font-semibold text-status-critical-ink bg-critical-soft rounded-2xl px-4 py-3">{error}</p>}
       <button type="submit" disabled={busy} className="w-full min-h-12 rounded-full bg-pine text-ivory text-[15px] font-bold hover:bg-forest-light transition-colors disabled:opacity-60">
         {busy ? 'Signing in…' : 'Sign in'}

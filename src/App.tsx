@@ -1564,9 +1564,15 @@ export default function App() {
     const refreshMs = 5000 // five-second demo display refresh
     let active = true
     let requestInProgress = false
+    // a test panel button can ask for a refresh while a poll is mid-flight. that poll may have
+    // started before the change, so run one more right after it instead of dropping the ask
+    let refreshAgain = false
 
     async function refreshBins() {
-      if (requestInProgress) return
+      if (requestInProgress) {
+        refreshAgain = true
+        return
+      }
       requestInProgress = true
       try {
         const response = await fetch(`${apiUrl}/api/tribins`, { cache: 'no-store' })
@@ -1578,8 +1584,13 @@ export default function App() {
         }
       } catch {
         // Expected when the local backend isn't running: keep sample data.
+        if (active) setApiLive(false)
       } finally {
         requestInProgress = false
+        if (refreshAgain && active) {
+          refreshAgain = false
+          void refreshBins()
+        }
       }
     }
 

@@ -6,9 +6,10 @@ import 'leaflet/dist/leaflet.css'
 import { apiRequest, triBinNumber } from './api'
 import type { ToolBin } from './TestPanelPage'
 
-// zones map (editors): drag on the map to draw an area, drag the area to move it, or tap bins one
-// by one. then put everything picked into a zone, an existing one or a new letter.
-// the client liked making zones by picking bins or by lat/long, this does both
+// zones map (editors): drag on the map to draw an area, drag the area to move it, drag a corner to
+// resize it, or tap bins one by one. then put everything picked into a zone, an existing one or a new
+// letter. "edit a zone" opens a zone's area so you can move or resize it, and saving keeps exactly the
+// bins inside. the client liked making zones by picking bins or by lat/long, this does both
 
 const OSM_CREDIT = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 const CAMPUS: [[number, number], [number, number]] = [[38.5525, -121.4300], [38.5665, -121.4175]]
@@ -26,10 +27,19 @@ function zoneColor(letter: string) {
   return ZONE_COLORS[(letter.charCodeAt(0) - 65) % ZONE_COLORS.length]
 }
 
-type Gesture = { kind: 'draw'; start: LatLng } | { kind: 'move'; start: LatLng; from: LatLngBounds; x: number; y: number }
+type Gesture =
+  | { kind: 'draw'; start: LatLng }
+  | { kind: 'move'; start: LatLng; from: LatLngBounds; x: number; y: number }
+  | { kind: 'resize'; anchor: LatLng }
 
 // how close (px) a tap inside the area has to be to a bin to toggle it
 const TAP_RADIUS = 14
+// how close (px) a press has to be to a corner to grab it. big enough for a finger on an ipad
+const HANDLE_RADIUS = 22
+
+function cornersOf(b: LatLngBounds) {
+  return [b.getNorthWest(), b.getNorthEast(), b.getSouthEast(), b.getSouthWest()]
+}
 
 // pointer events on the map itself, so drawing works the same with a mouse, a finger or a pencil
 function AreaTool({ drawing, area, bins, onArea, onDone, onTapBin }: {
@@ -55,7 +65,12 @@ function AreaTool({ drawing, area, bins, onArea, onDone, onTapBin }: {
       if (e.button !== 0) return
       const { drawing, area } = latest.current
       const at = map.mouseEventToLatLng(e)
+      const point = map.mouseEventToContainerPoint(e)
+      // a corner of the area, grabbed to resize it. the opposite corner stays put
+      const corners = area ? cornersOf(area) : []
+      const grabbed = corners.findIndex(c => map.latLngToContainerPoint(c).distanceTo(point) <= HANDLE_RADIUS)
       if (drawing) gesture.current = { kind: 'draw', start: at }
+      else if (area && grabbed >= 0) gesture.current = { kind: 'resize', anchor: corners[(grabbed + 2) % 4] }
       else if (area && area.contains(at)) gesture.current = { kind: 'move', start: at, from: area, x: e.clientX, y: e.clientY }
       else return
       // runs before leaflet's own pan handler, so the map holds still while we draw or move
@@ -71,6 +86,8 @@ function AreaTool({ drawing, area, bins, onArea, onDone, onTapBin }: {
       const at = map.mouseEventToLatLng(e)
       if (g.kind === 'draw') {
         latest.current.onArea(latLngBounds(g.start, at))
+      } else if (g.kind === 'resize') {
+        latest.current.onArea(latLngBounds(g.anchor, at))
       } else {
         const dLat = at.lat - g.start.lat
         const dLng = at.lng - g.start.lng
@@ -123,13 +140,28 @@ function AreaTool({ drawing, area, bins, onArea, onDone, onTapBin }: {
     }
   }, [map])
 
-  // a finger on the map shouldn't scroll the page while drawing
+  // a finger on the map shouldn't scroll the page while drawing, and esc stops drawing
   useEffect(() => {
     map.getContainer().style.touchAction = drawing ? 'none' : ''
     map.getContainer().style.cursor = drawing ? 'crosshair' : ''
+    if (!drawing) return
+    function key(e: KeyboardEvent) {
+      if (e.key === 'Escape') latest.current.onDone()
+    }
+    window.addEventListener('keydown', key)
+    return () => window.removeEventListener('keydown', key)
   }, [map, drawing])
 
   return null
+}
+
+// a little room around a zone's bins, and a minimum size so a one-bin zone is still easy to grab
+function padArea(b: LatLngBounds) {
+  const minSpan = 0.0006
+  const c = b.getCenter()
+  const halfLat = Math.max(b.getNorth() - b.getSouth(), minSpan) / 2
+  const halfLng = Math.max(b.getEast() - b.getWest(), minSpan) / 2
+  return latLngBounds([c.lat - halfLat, c.lng - halfLng], [c.lat + halfLat, c.lng + halfLng]).pad(0.15)
 }
 
 function fmt(n: number) {
@@ -141,6 +173,8 @@ export default function ZonesMap({ bins, onChanged }: { bins: ToolBin[]; onChang
   const [area, setArea] = useState<LatLngBounds | null>(null)
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [zone, setZone] = useState('')
+  // the zone letter being edited, or null when making/adding to a zone
+  const [editing, setEditing] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
 
@@ -156,6 +190,12 @@ export default function ZonesMap({ bins, onChanged }: { bins: ToolBin[]; onChang
   }, [letters])
   const zoneOptions = nextLetter ? [...letters, nextLetter] : letters
   const target = zone || letters[0] || nextLetter
+
+  // each zone's area: the box around its bins, drawn faintly so you can see what you're editing
+  const zoneAreas = useMemo(() => letters.map(l => {
+    const inZone = placed.filter(b => zoneLetter(b.zone) === l)
+    return { letter: l, bounds: padArea(latLngBounds(inZone.map(b => [b.lat, b.lng] as [number, number]))) }
+  }), [letters, placed])
 
   const initialBounds = useMemo(() => {
     if (placed.length === 0) return latLngBounds(CAMPUS)
@@ -183,7 +223,19 @@ export default function ZonesMap({ bins, onChanged }: { bins: ToolBin[]; onChang
     setArea(null)
     setPicked(new Set())
     setDrawing(false)
+    setEditing(null)
     setMessage(null)
+  }
+
+  // opens a zone's area so it can be dragged or resized; saving keeps exactly the bins inside
+  function editZone(letter: string) {
+    if (!letter) return clear()
+    const found = zoneAreas.find(z => z.letter === letter)
+    if (!found) return
+    setDrawing(false)
+    setEditing(letter)
+    setZone(letter)
+    changeArea(found.bounds)
   }
 
   // the area's edges as numbers, for typing exact coordinates
@@ -195,16 +247,29 @@ export default function ZonesMap({ bins, onChanged }: { bins: ToolBin[]; onChang
     changeArea(latLngBounds([box.south, box.west], [box.north, box.east]))
   }
 
+  // bins that were in the zone being edited but aren't selected anymore leave it
+  const leaving = editing && target === editing ? placed.filter(b => zoneLetter(b.zone) === editing && !picked.has(b.id)) : []
+
   async function assign() {
-    if (picked.size === 0 || !target) return
+    if ((picked.size === 0 && leaving.length === 0) || !target) return
     setSaving(true)
     setMessage(null)
     try {
+      const parts: string[] = []
       const ids = [...picked].map(triBinNumber).filter(Number.isFinite)
-      const res = await apiRequest<{ message: string }>('/api/admin/zones/assign', 'POST', { zone: target, triBinIDs: ids })
-      setMessage({ ok: true, text: `${res.message}.` })
+      if (ids.length > 0) {
+        const res = await apiRequest<{ message: string }>('/api/admin/zones/assign', 'POST', { zone: target, triBinIDs: ids })
+        parts.push(res.message)
+      }
+      const out = leaving.map(b => triBinNumber(b.id)).filter(Number.isFinite)
+      if (out.length > 0) {
+        const res = await apiRequest<{ message: string }>('/api/admin/zones/assign', 'POST', { zone: '', triBinIDs: out })
+        parts.push(res.message)
+      }
+      setMessage({ ok: true, text: `${parts.join('. ')}.` })
       setArea(null)
       setPicked(new Set())
+      setEditing(null)
       onChanged()
     } catch (err) {
       setMessage({ ok: false, text: err instanceof Error ? err.message : 'Could not update zones.' })
@@ -220,8 +285,18 @@ export default function ZonesMap({ bins, onChanged }: { bins: ToolBin[]; onChang
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
+        <label className="sr-only" htmlFor="edit-zone">Edit a zone</label>
+        <select
+          id="edit-zone"
+          value={editing ?? ''}
+          onChange={e => editZone(e.target.value)}
+          className="min-h-11 rounded-full bg-white/70 border border-pine/10 px-4 text-sm font-bold text-pine outline-none focus:border-teal/50 focus:ring-2 focus:ring-teal/20"
+        >
+          <option value="">Edit a zone…</option>
+          {letters.map(l => <option key={l} value={l}>Edit Zone {l}</option>)}
+        </select>
         <button
-          onClick={() => { setDrawing(d => !d); setMessage(null) }}
+          onClick={() => { setDrawing(d => !d); setEditing(null); setMessage(null) }}
           aria-pressed={drawing}
           className={`min-h-11 rounded-full px-5 text-sm font-bold transition-colors ${drawing ? 'bg-teal text-ivory' : 'bg-pine text-ivory hover:bg-forest-light'}`}
         >
@@ -231,7 +306,11 @@ export default function ZonesMap({ bins, onChanged }: { bins: ToolBin[]; onChang
           <button onClick={clear} className="min-h-11 rounded-full px-4 text-sm font-bold glass text-pine-muted hover:text-pine">Clear</button>
         )}
         <p className="text-sm font-medium text-pine-muted">
-          {drawing ? 'Press and drag to draw the area.' : area ? 'Drag the area to move it, or tap bins to add or remove them.' : 'Or tap bins one by one.'}
+          {drawing
+            ? 'Press and drag to draw the area. Esc to stop.'
+            : area
+              ? 'Drag the area to move it, drag a corner to resize it, or tap bins to add or remove them.'
+              : 'Or tap bins one by one.'}
         </p>
       </div>
 
@@ -239,7 +318,13 @@ export default function ZonesMap({ bins, onChanged }: { bins: ToolBin[]; onChang
         <MapContainer bounds={initialBounds} maxZoom={19} className="h-full w-full" scrollWheelZoom>
           <TileLayer url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" maxZoom={19} attribution={OSM_CREDIT} className="[filter:grayscale(.85)_brightness(1.05)_contrast(.9)]" />
           <AreaTool drawing={drawing} area={area} bins={placed} onArea={changeArea} onDone={() => setDrawing(false)} onTapBin={toggle} />
+          {zoneAreas.filter(z => z.letter !== editing).map(z => (
+            <Rectangle key={z.letter} bounds={z.bounds} pathOptions={{ color: zoneColor(z.letter), weight: 1.5, dashArray: '2 6', fill: true, fillColor: zoneColor(z.letter), fillOpacity: 0.05 }} interactive={false} />
+          ))}
           {area && <Rectangle bounds={area} pathOptions={{ color: '#1B5B65', weight: 2, dashArray: '6 6', fillColor: '#1B5B65', fillOpacity: 0.1 }} interactive={false} />}
+          {area && !drawing && cornersOf(area).map((c, i) => (
+            <CircleMarker key={i} center={c} radius={7} interactive={false} pathOptions={{ color: '#1B5B65', weight: 2, fillColor: '#F4F1DE', fillOpacity: 1 }} />
+          ))}
           {placed.map(b => {
             const on = picked.has(b.id)
             const color = zoneColor(zoneLetter(b.zone))
@@ -277,10 +362,17 @@ export default function ZonesMap({ bins, onChanged }: { bins: ToolBin[]; onChang
       <div className="rounded-[28px] p-5 md:p-6 glass space-y-4">
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex-1 min-w-[12rem]">
-            <p className="text-lg font-bold text-pine">{picked.size} {picked.size === 1 ? 'bin' : 'bins'} selected</p>
+            <p className="text-lg font-bold text-pine">
+              {editing ? `Editing Zone ${editing} · ` : ''}{picked.size} {picked.size === 1 ? 'bin' : 'bins'} selected
+            </p>
             <p className="text-[13px] font-medium text-pine-muted truncate">
               {pickedBins.length ? pickedBins.slice(0, 6).map(b => b.name).join(', ') + (pickedBins.length > 6 ? ` and ${pickedBins.length - 6} more` : '') : 'Draw an area or tap bins on the map.'}
             </p>
+            {leaving.length > 0 && (
+              <p className="text-[13px] font-bold text-status-warn-ink mt-0.5">
+                {leaving.length} {leaving.length === 1 ? 'bin leaves' : 'bins leave'} Zone {editing} and {leaving.length === 1 ? 'goes' : 'go'} back to no zone.
+              </p>
+            )}
           </div>
           <label className="w-40">
             <span className="block text-sm font-bold text-pine mb-1.5">Move to</span>
@@ -288,8 +380,8 @@ export default function ZonesMap({ bins, onChanged }: { bins: ToolBin[]; onChang
               {zoneOptions.map(l => <option key={l} value={l}>Zone {l}{l === nextLetter ? ' (new)' : ''}</option>)}
             </select>
           </label>
-          <button onClick={assign} disabled={saving || picked.size === 0 || !target} className="min-h-12 rounded-full bg-pine text-ivory px-6 text-[15px] font-bold hover:bg-forest-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-            {saving ? 'Saving…' : `Assign to Zone ${target}`}
+          <button onClick={assign} disabled={saving || (picked.size === 0 && leaving.length === 0) || !target} className="min-h-12 rounded-full bg-pine text-ivory px-6 text-[15px] font-bold hover:bg-forest-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+            {saving ? 'Saving…' : editing && target === editing ? `Save Zone ${editing}` : `Assign to Zone ${target}`}
           </button>
         </div>
 

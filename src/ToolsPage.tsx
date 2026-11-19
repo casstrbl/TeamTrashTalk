@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { clearServerLogin, loadServerLogin } from './api'
+import { useEffect, useState } from 'react'
+import { SIGNED_OUT_EVENT, clearServerLogin, loadServerLogin } from './api'
 import type { ServerProfile } from './api'
 import ServerSignIn from './ServerSignIn'
 import TestPanelPage from './TestPanelPage'
@@ -16,7 +16,7 @@ export default function ToolsPage({ bins, allBins, fillOn, fillAt, offlineOn, us
   fillOn: boolean
   fillAt: number
   offlineOn: boolean
-  usingSampleData: boolean // the server isn't answering, so the app is showing mockBins
+  usingSampleData: boolean // the server isn’t answering (the last poll failed)
   onChanged: () => void
   onScrollTop: () => void
 }) {
@@ -26,8 +26,22 @@ export default function ToolsPage({ bins, allBins, fillOn, fillAt, offlineOn, us
     return login?.staff.role === 'editor' ? login.staff : null
   })
 
+  const [expired, setExpired] = useState(false)
+
+  // the server token ran out (or the server restarted) mid-session: show the sign-in card again
+  // instead of leaving every button failing
+  useEffect(() => {
+    function signedOut() {
+      setExpired(true)
+      setStaff(null)
+    }
+    window.addEventListener(SIGNED_OUT_EVENT, signedOut)
+    return () => window.removeEventListener(SIGNED_OUT_EVENT, signedOut)
+  }, [])
+
   function signOut() {
     clearServerLogin()
+    setExpired(false)
     setStaff(null)
   }
 
@@ -63,12 +77,15 @@ export default function ToolsPage({ bins, allBins, fillOn, fillAt, offlineOn, us
 
       {usingSampleData && (
         <p className="rounded-2xl bg-warn-soft text-status-warn-ink text-sm font-bold px-4 py-3">
-          The server isn’t answering, so the app is showing sample bins. Start the backend (or check the test link) to use these tools.
+          The server isn’t answering right now, so these buttons won’t work. Start the backend (or check the test link) and this message goes away by itself.
         </p>
       )}
 
       {!staff ? (
-        <ServerSignIn onSignedIn={setStaff} />
+        <ServerSignIn
+          notice={expired ? 'Your server sign-in ran out, so please sign in again.' : ''}
+          onSignedIn={s => { setExpired(false); setStaff(s) }}
+        />
       ) : tab === 'test' ? (
         <TestPanelPage bins={bins} fillOn={fillOn} fillAt={fillAt} offlineOn={offlineOn} onChanged={onChanged} />
       ) : (

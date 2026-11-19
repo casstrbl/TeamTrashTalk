@@ -89,7 +89,8 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
   onChanged: () => void // refresh the bins right away instead of waiting for the next poll
 }) {
   const sorted = useMemo(() => [...bins].sort((a, b) => triBinNumber(a.id) - triBinNumber(b.id)), [bins])
-  const [binId, setBinId] = useState(() => sorted[0]?.id ?? '')
+  // start on a bin that's reporting, so the first button press shows a change right away
+  const [binId, setBinId] = useState(() => (sorted.find(b => b.sensorStatus === 'online') ?? sorted[0])?.id ?? '')
   const [stream, setStream] = useState<Stream>('Recycling')
   const [percent, setPercent] = useState(85)
   const [busy, setBusy] = useState<Action | null>(null)

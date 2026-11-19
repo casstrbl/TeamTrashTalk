@@ -124,7 +124,8 @@ export default function PickupPage({ bins, zones, zoneFilter, onZoneFilter, thre
   // only pickups for bins this person can see, in the picked zone
   const recent = pickups
     .filter(p => visibleIds.has(p.binId) && inZone(p.zone))
-    .map(p => ({ ...p, at: new Date(p.time).getTime() }))
+    // safari on the ipad can't read microseconds, so trim to milliseconds like the history page does
+    .map(p => ({ ...p, at: new Date(p.time.replace(/(\.\d{3})\d+/, '$1')).getTime() }))
   const todayCount = recent.filter(p => p.at >= startOfToday()).length
 
   function exportPickups() {

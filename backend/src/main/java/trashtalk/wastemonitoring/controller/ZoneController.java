@@ -20,7 +20,8 @@ import main.java.trashtalk.wastemonitoring.config.DatabaseConfig;
 import main.java.trashtalk.wastemonitoring.service.LoginService;
 
 // POST /api/admin/zones/assign {"zone": "C", "triBinIDs": [12, 13, 14]}
-// puts every listed bin in one zone at once (the zones map draws an area and sends what's inside). editors only
+// puts every listed bin in one zone at once (the zones map draws an area and sends what's inside). editors only.
+// "zone": "" takes the bins out of their zone, for when an edited zone's area no longer covers them
 public class ZoneController implements HttpHandler {
 
     static final int MAX_BINS = 1000;
@@ -62,8 +63,9 @@ public class ZoneController implements HttpHandler {
             return;
         }
 
-        String zone = cleanZone(request.zone());
-        if (zone == null) {
+        boolean clearing = request.zone() != null && request.zone().isBlank();
+        String zone = clearing ? null : cleanZone(request.zone());
+        if (zone == null && !clearing) {
             send(exchange, 400, Map.of("error", "Zone must be one letter, A to Z"));
             return;
         }
@@ -82,7 +84,11 @@ public class ZoneController implements HttpHandler {
 
         try {
             int updated = assign(zone, ids);
-            send(exchange, 200, Map.of("message", "Moved " + updated + " bins to Zone " + zone, "zone", zone, "updated", updated));
+            String noun = updated == 1 ? " bin" : " bins";
+            String message = clearing
+                    ? "Took " + updated + noun + " out of their zone"
+                    : "Moved " + updated + noun + " to Zone " + zone;
+            send(exchange, 200, Map.of("message", message, "zone", clearing ? "" : zone, "updated", updated));
         } catch (SQLException e) {
             send(exchange, 500, Map.of("error", "Could not update zones"));
         }
@@ -102,7 +108,11 @@ public class ZoneController implements HttpHandler {
             connection.setAutoCommit(false);
             try (PreparedStatement statement = connection.prepareStatement("UPDATE triBins SET zone = ? WHERE triBinID = ?")) {
                 for (int id : ids) {
-                    statement.setString(1, zone);
+                    if (zone == null) {
+                        statement.setNull(1, java.sql.Types.CHAR);
+                    } else {
+                        statement.setString(1, zone);
+                    }
                     statement.setInt(2, id);
                     statement.addBatch();
                 }

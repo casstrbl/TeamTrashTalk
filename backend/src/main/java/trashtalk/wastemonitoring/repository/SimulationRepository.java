@@ -78,6 +78,12 @@ public class SimulationRepository {
 
                 station.executeBatch();
                 compartment.executeBatch();
+                // bins are back to their starting levels, so close the fill alerts from the demo
+                try (PreparedStatement alerts = connection.prepareStatement(
+                        "UPDATE alerts SET resolved = TRUE, resolved_at = ? WHERE resolved = FALSE")) {
+                    alerts.setTimestamp(1, Timestamp.valueOf(java.time.LocalDateTime.now()));
+                    alerts.executeUpdate();
+                }
                 connection.commit();
             } catch (SQLException error) {
                 connection.rollback();

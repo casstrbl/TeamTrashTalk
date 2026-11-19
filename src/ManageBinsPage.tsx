@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { divIcon } from 'leaflet'
+import type { LeafletMouseEvent } from 'leaflet'
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import { apiRequest, triBinNumber } from './api'
@@ -44,7 +45,7 @@ function validCoords(lat: string, lng: string) {
 
 // tap anywhere on the map to drop the pin there
 function TapToPlace({ onPick }: { onPick: (lat: number, lng: number) => void }) {
-  useMapEvents({ click: e => onPick(e.latlng.lat, e.latlng.lng) })
+  useMapEvents({ click: (e: LeafletMouseEvent) => onPick(e.latlng.lat, e.latlng.lng) })
   return null
 }
 
