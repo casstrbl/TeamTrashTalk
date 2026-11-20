@@ -174,6 +174,25 @@ public class DatabaseInitializer {
                         """);
                 } 
                 
+                try (Statement statusStatement =
+                        connection.createStatement()) {
+                    statusStatement.execute(
+                        "ALTER TABLE bins ADD COLUMN IF NOT EXISTS sensorStatus VARCHAR(10) NOT NULL DEFAULT 'online'"
+                    );
+                    // databases made before the alert rules don't have this yet
+                    statusStatement.execute(
+                        "ALTER TABLE bins ADD COLUMN IF NOT EXISTS lastReadingTime TIMESTAMP"
+                    );
+                    // green / yellow / red, saved with every reading
+                    statusStatement.execute(
+                        "ALTER TABLE bins ADD COLUMN IF NOT EXISTS status VARCHAR(10)"
+                    );
+                    // time sensor last made contact with bin
+                    statusStatement.execute(
+                    		"ALTER TABLE bins ADD COLUMN IF NOT EXISTS last_sensor_contact TIMESTAMP"
+                    );
+                }
+                
 
 		} catch (SQLException e) {
 
