@@ -3,7 +3,6 @@ package main.java.trashtalk.wastemonitoring.service;
 import main.java.trashtalk.wastemonitoring.model.Bin;
 import main.java.trashtalk.wastemonitoring.model.TriBin;
 import main.java.trashtalk.wastemonitoring.repository.AlertRepository;
-import main.java.trashtalk.wastemonitoring.repository.DemoAlertRepository;
 import main.java.trashtalk.wastemonitoring.repository.BinRepository;
 import main.java.trashtalk.wastemonitoring.model.Sensor;
 import main.java.trashtalk.wastemonitoring.model.SensorReading;
@@ -38,7 +37,6 @@ public class GatewayDataService {
 
     private SensorService sensorService;
     private HistoryService historyService;
-    private final BinService binService = new BinService();
     private final TriBinService triBinService = new TriBinService();
     private final AlertService alertService = new AlertService(triBinService, new AlertRepository());
     private final EmptyDetectionService emptyDetectionService = new EmptyDetectionService();
@@ -157,7 +155,6 @@ public class GatewayDataService {
             }
 
             boolean committed = false;
-            boolean emptied = false;
             boolean applied = false;
             double heightBeforeReading = 0;
             double heightAfterReading = 0;
@@ -172,11 +169,6 @@ public class GatewayDataService {
 
                 	binRepository.updateSensorContact(connection, bin, malfunction);
                     AlertService reportAlerts = alertService;
-                    if (simulated) {
-                        DemoAlertRepository demoAlerts = DemoAlertRepository.forReading(
-                                connection, reading, bin, battery);
-                        reportAlerts = new AlertService(triBinService, demoAlerts);
-                    }
                     reportAlerts.checkSensorAlerts(connection, bin, triBin, battery, malfunction);
 
                 	if (!malfunction) {
