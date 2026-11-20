@@ -9,23 +9,57 @@ import java.util.List;
 
 /** Stores every accepted reading in the database instead of losing it on restart. */
 public class HistoryService {
-    public void addReading(SensorReading reading, Bin bin) {
-        String sql = "INSERT INTO sensor_history (triBinID, binID, sensorID, readingValue, unit, readingTime) VALUES (?, ?, ?, ?, ?, ?)";
-        try (Connection connection = DatabaseConfig.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setInt(1, bin.getTriBinID());
-            statement.setInt(2, bin.getBinID());
-            statement.setInt(3, reading.getSensorID());
-            statement.setDouble(4, reading.getValue());
-            statement.setString(5, reading.getUnit());
-            statement.setTimestamp(6, Timestamp.valueOf(reading.getTimestamp()));
-            statement.executeUpdate();
-        } catch (SQLException e) {
-            throw new IllegalStateException("Could not save sensor history", e);
-        }
-    }
+	/** Retained for callers that do not manage a transaction. */
+	public void addReading(SensorReading reading, Bin bin) {
 
-    /** Retained for older callers that don't supply a bin. */
+	    try (Connection connection = DatabaseConfig.getConnection()) {
+	        addReading(connection, reading, bin);
+
+	    } catch (SQLException e) {
+	        throw new IllegalStateException(
+	                "Could not save sensor history.", e);
+	    }
+	}
+
+	/**
+	 * Saves a reading using the caller's transaction.
+	 * Does not close, commit, or roll back the supplied connection.
+	 */
+	public void addReading(
+	        Connection connection,
+	        SensorReading reading,
+	        Bin bin) throws SQLException {
+
+	    String sql = """
+	            INSERT INTO sensor_history
+	                (triBinID, binID, sensorID,
+	                 readingValue, unit, readingTime)
+	            VALUES (?, ?, ?, ?, ?, ?)
+	            """;
+
+	    try (PreparedStatement statement =
+	            connection.prepareStatement(sql)) {
+
+	        statement.setInt(1, bin.getTriBinID());
+	        statement.setInt(2, bin.getBinID());
+	        statement.setInt(3, reading.getSensorID());
+	        statement.setDouble(4, reading.getValue());
+	        statement.setString(5, reading.getUnit());
+
+	        statement.setTimestamp(
+	                6,
+	                Timestamp.valueOf(reading.getTimestamp())
+	        );
+
+	        if (statement.executeUpdate() != 1) {
+	            throw new SQLException(
+	                    "Expected to insert exactly one sensor reading."
+	            );
+	        }
+	    }
+	}
+
+	 /** Retained for older callers that don't supply a bin. */
     public void addReading(SensorReading reading) {
         String sql = "INSERT INTO sensor_history (sensorID, readingValue, unit, readingTime) VALUES (?, ?, ?, ?)";
         try (Connection connection = DatabaseConfig.getConnection();

@@ -1,4 +1,5 @@
 package main.java.trashtalk.wastemonitoring;
+import main.java.trashtalk.wastemonitoring.controller.SystemCheckController;
 
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -13,12 +14,18 @@ import main.java.trashtalk.wastemonitoring.database.DatabaseViewer;
 import main.java.trashtalk.wastemonitoring.service.HistoryCsvService;
 import main.java.trashtalk.wastemonitoring.service.HistoryService;
 import main.java.trashtalk.wastemonitoring.service.LoginService;
+import main.java.trashtalk.wastemonitoring.controller.TriBinManagementController;
+import main.java.trashtalk.wastemonitoring.controller.SimulateController;
+import main.java.trashtalk.wastemonitoring.controller.DetectedPickupController;
+import main.java.trashtalk.wastemonitoring.controller.ZoneController;
+import main.java.trashtalk.wastemonitoring.database.DemoAccountSeeder;
 
 public class Application {
 
 	public static void main(String[] args) {
 
 		DatabaseInitializer.initializeDatabase();
+		DemoAccountSeeder.seedFromEnvironment();
 		DatabaseViewer.viewTriBins();
 		DatabaseViewer.viewBins();
 
@@ -64,6 +71,36 @@ public class Application {
 					new LoginController(loginService)
 			);
 
+			// Connect /api/system-check to the SystemCheckController.
+			server.createContext(
+					"/api/system-check",
+					new SystemCheckController(loginService)
+			);
+
+			// Connect editor-only TriBin management endpoints.
+			server.createContext(
+					"/api/admin/tribins",
+					new TriBinManagementController(loginService)
+			);
+
+			// pickups found in the sensor readings (no "emptied" button needed)
+			server.createContext(
+					"/api/pickups/detected",
+					new DetectedPickupController()
+			);
+
+			// put many bins in one zone at once (editors only)
+			server.createContext(
+					"/api/admin/zones",
+					new ZoneController(loginService)
+			);
+
+			// test panel buttons (editors only)
+			server.createContext(
+					"/api/simulate/",
+					new SimulateController(loginService)
+			);
+
 			// Start the server
 			server.start();
 
@@ -73,6 +110,8 @@ public class Application {
             if (fakeSensorScheduler != null) {
                 Runtime.getRuntime().addShutdownHook(new Thread(fakeSensorScheduler::close));
             }
+            // lets the test panel see and stop it
+            main.java.trashtalk.wastemonitoring.service.SensorTimer.adopt(fakeSensorScheduler);
 
 			System.out.println("Health: http://localhost:" + serverPort + "/api/health");
 			System.out.println("TriBins: http://localhost:" + serverPort + "/api/tribins");

@@ -22,14 +22,22 @@ public class BinService {
 	 * 
 	 * @return the current status of the bin
 	 */
-	public BinStatus getStatus(Bin b){
-		double percentFull = getPercentage(b);
-		if (percentFull < 50)		// If the Bin is less than 50% full, its status is GREEN.
+	public BinStatus getStatus(Bin b) {
+		
+		double percentFull = b.getWasteHeight() / Bin.BIN_HEIGHT * 100.0;
+		if (percentFull < 50.0)		// If the Bin is less than 50% full, its status is GREEN.
 			return Bin.BinStatus.GREEN;
-		else if (percentFull < 80)		// If the Bin is less than 80% but more than 50%, its status is YELLOW.
+		else if (percentFull < 80.0)		// If the Bin is less than 80% but more than 50%, its status is YELLOW.
 			return Bin.BinStatus.YELLOW;
-		else
-			return Bin.BinStatus.RED;		//If the Bin is 80% or greater, its status is RED.
+		
+		return Bin.BinStatus.RED;		//If the Bin is 80% or greater, its status is RED.
 	}
-
+	
+	
+	/**
+	 * Sets the status within the bin object.
+	 */
+	public void setStatus(Bin b) {
+		b.setStatus(getStatus(b));
+	}
 }

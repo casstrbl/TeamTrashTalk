@@ -25,18 +25,54 @@ public class SensorService {
      * - Connect this method to the future API/gateway data path.
      */
 
-    // Returns whether the reading was accepted so valid readings can be stored in history.
-    public boolean processReading(SensorReading reading, Sensor sensor, Bin bin) {
-        if (reading.getSensorID() == sensor.getSensorID()
-                && sensor.isActive()) {
+	private final BinService binService = new BinService();
+	
+	/**
+	 * Validates a reading without changing the bin.
+	 */
+	public boolean isValidReading(
+	        SensorReading reading,
+	        Sensor sensor,
+	        Bin bin) {
 
-            // Temporary behavior:
-            // The reading value is currently treated as waste height.
-            // For ultrasonic sensors, this will later need to be converted
-            // from sensor-to-trash distance into actual waste height/fullness.
-            bin.setWasteHeight(reading);
-            return true;
-        }
-        return false;
-    }
+	    if (reading == null
+	            || sensor == null
+	            || bin == null
+	            || reading.getTimestamp() == null) {
+
+	        return false;
+	    }
+
+	    if (reading.getSensorID() != sensor.getSensorID()
+	            || sensor.getBinID() != bin.getBinID()
+	            || !sensor.isActive()) {
+
+	        return false;
+	    }
+
+	    double height = reading.getValue();
+
+	    return Double.isFinite(height)
+	            && height >= 0
+	            && height <= Bin.BIN_HEIGHT;
+	}
+
+	/**
+	 * Applies a valid reading to the bin.
+	 * Timestamp ordering is managed by GatewayDataService.
+	 */
+	public boolean processReading(
+	        SensorReading reading,
+	        Sensor sensor,
+	        Bin bin) {
+
+	    if (!isValidReading(reading, sensor, bin)) {
+	        return false;
+	    }
+
+	    bin.setWasteHeight(reading.getValue());
+	    binService.setStatus(bin);
+
+	    return true;
+	}
 }

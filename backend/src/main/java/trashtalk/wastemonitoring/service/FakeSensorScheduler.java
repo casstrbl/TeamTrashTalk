@@ -53,6 +53,8 @@ public final class FakeSensorScheduler implements AutoCloseable {
     private final int simSpeed;
     // the "real" waste level per bin, readings are this plus sensor wobble
     private final Map<Integer, Double> trueHeights = new HashMap<>();
+    // started from the test panel: only bins with a zone (the ones on the dashboard)
+    private boolean onlyZonedBins = false;
 
     public FakeSensorScheduler(int intervalSeconds) {
         this(intervalSeconds, DEFAULT_SIM_SPEED);
@@ -86,6 +88,21 @@ public final class FakeSensorScheduler implements AutoCloseable {
             thread.setDaemon(true);
             return thread;
         });
+    }
+
+    // the test panel's start button: same timer, but only for bins that have a zone
+    public static FakeSensorScheduler forZonedBins(int intervalSeconds, int simSpeed) {
+        FakeSensorScheduler scheduler = new FakeSensorScheduler(intervalSeconds, simSpeed);
+        scheduler.onlyZonedBins = true;
+        return scheduler;
+    }
+
+    public int getIntervalSeconds() {
+        return intervalSeconds;
+    }
+
+    public int getSimSpeed() {
+        return simSpeed;
     }
 
     public static FakeSensorScheduler startIfEnabled() {
@@ -149,6 +166,9 @@ public final class FakeSensorScheduler implements AutoCloseable {
     /** Runs one fake reading round; also useful for an integration test. */
     public int generateOnce() {
         List<TriBin> triBins = binRepository.findAllTriBins();
+        if (onlyZonedBins) {
+            triBins.removeIf(triBin -> triBin.getZone() == '\0' || triBin.getZone() == ' ');
+        }
         int count = 0;
         LocalDateTime now = LocalDateTime.now();
         double simHours = intervalSeconds * (double) simSpeed / 3600.0;
@@ -177,8 +197,14 @@ public final class FakeSensorScheduler implements AutoCloseable {
                 double simulatedHeightCm = withSensorNoise(trueCm, random);
 
                 // Reuse the team's existing simulated reading / gateway path.
-                fakeSensorService.sendFakeReading(sensor, bin,
-                        simulatedHeightCm, "cm", triBin.getBattery());
+                fakeSensorService.sendFakeReading(
+                        sensor,
+                        bin,
+                        triBin,
+                        simulatedHeightCm,
+                        "cm",
+                        triBin.getBattery()
+                );
                 count++;
             }
             triBin.setLastUpdated(now);
