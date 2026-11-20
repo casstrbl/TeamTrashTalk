@@ -1,3 +1,4 @@
+import { supabase } from './supabaseClient'
 import { useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import BinLogo from './BinLogo'
@@ -91,24 +92,48 @@ export default function LoginPage({ staff, onLogin, onCreate, onScrollTop }: {
     onScrollTop()
   }
 
-  function submitLogin(e: FormEvent) {
-    e.preventDefault()
-    const found = staff.find(s => s.email.toLowerCase() === email.trim().toLowerCase())
-    if (!found) return setError('We couldn’t find that email. Check the spelling, or create an account.')
-    if (!password) return setError('Enter your password.')
-    onLogin(found.id)
+
+async function submitLogin(e: FormEvent) {
+  e.preventDefault()
+  setError('')
+
+  const loginEmail = email.trim().toLowerCase()
+
+  if (!loginEmail || !password) {
+    return setError('Enter your email and password.')
   }
 
-  function submitCreate(e: FormEvent) {
-    e.preventDefault()
-    const clean = email.trim().toLowerCase()
-    if (!name.trim()) return setError('Enter your name.')
-    // any email works, not just @csus.edu (that one's tied to the school sso)
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return setError('Enter a valid email address.')
-    if (staff.some(s => s.email.toLowerCase() === clean)) return setError('That email already has an account. Log in instead.')
-    if (password.length < 8) return setError('Use at least 8 characters for your password.')
-    onCreate(name.trim(), clean)
+  const { data, error: authError } =
+    await supabase.auth.signInWithPassword({
+      email: loginEmail,
+      password
+    })
+
+  if (authError || !data.user) {
+    return setError('Incorrect email or password.')
   }
+
+  const found = staff.find(
+    s => s.email.toLowerCase() === data.user.email?.toLowerCase()
+  )
+
+  if (!found) {
+    await supabase.auth.signOut()
+    return setError('No demo role assigned to this account.')
+  }
+
+  onLogin(found.id)
+}
+
+
+
+function submitCreate(e: FormEvent) {
+  e.preventDefault()
+  setError(
+    'Account registration is currently managed by the TrashTalk team. Please contact the administrator for access.'
+  )
+}
+
 
   return (
     <div className="relative min-h-dvh text-white flex flex-col">
@@ -124,13 +149,7 @@ export default function LoginPage({ staff, onLogin, onCreate, onScrollTop }: {
                 in one place.
               </h1>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => go('create')}
-                className="min-h-[72px] rounded-full glass-night text-white text-[17px] font-medium px-4 hover:bg-white/15 transition-colors"
-              >
-                Create account
-              </button>
+            <div className="grid grid-cols-1 gap-3">
               <button
                 onClick={() => go('login')}
                 className="min-h-[72px] rounded-full bg-lime text-pine text-[17px] font-semibold px-4 inline-flex items-center justify-center gap-2 hover:brightness-105 transition"
@@ -162,15 +181,7 @@ export default function LoginPage({ staff, onLogin, onCreate, onScrollTop }: {
               <button type="submit" className="min-h-[64px] rounded-full bg-lime text-pine text-[17px] font-semibold inline-flex items-center justify-center gap-2 hover:brightness-105 transition">
                 Log in <Arrow />
               </button>
-              <p className="text-center text-sm text-white/70">
-                New here?{' '}
-                <button type="button" onClick={() => go('create')} className="font-semibold text-lime underline-offset-4 hover:underline min-h-11 px-1">Create an account</button>
-              </p>
-              {/* demo only: there's no password check yet, so say which emails exist */}
-              <div className="glass-night rounded-2xl px-4 py-3 text-sm text-white/75 leading-relaxed">
-                <span className="font-semibold text-white">Demo accounts:</span> person1@example.com (editor), person2@example.com (viewer), person3@example.com (viewer, sample data). Any password works.
               </div>
-            </div>
           </form>
         )}
 
