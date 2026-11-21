@@ -151,6 +151,7 @@ public class DatabaseInitializer {
 				binStatement.execute();
 
 				// Execute the SQL statement to create the alerts table
+				upgradeOldAlertsTable(connection);
 				alertStatement.execute();
 
 				// Execute the SQL statement to createthe staff members table
@@ -272,6 +273,43 @@ private static void loadMissingTriBinData() {
 		throw new RuntimeException("Error loading missing GPS bin data.", e);
 	}
 }
+
+
+//the first alerts table had no auto id and no kind/acknowledged columns, so saving an alert failed
+//and took the whole sensor reading down with it. nothing could ever be saved to it, so an old empty
+//table is dropped and made again; one with rows just gets the missing columns
+private static void upgradeOldAlertsTable(Connection connection) throws SQLException {
+	try (Statement statement = connection.createStatement()) {
+		statement.executeQuery("SELECT kind, acknowledged FROM alerts WHERE 1 = 0").close();
+		return; // already the new table
+	} catch (SQLException missingTableOrColumns) {
+		// keep going
+	}
+	if (!connection.getAutoCommit()) {
+		connection.rollback(); // postgres won't run anything else after a failed statement
+	}
+	try (Statement statement = connection.createStatement()) {
+		int rows;
+		try (var results = statement.executeQuery("SELECT COUNT(*) FROM alerts")) {
+			results.next();
+			rows = results.getInt(1);
+		} catch (SQLException noTableYet) {
+			if (!connection.getAutoCommit()) {
+				connection.rollback();
+			}
+			return; // the create statement makes it
+		}
+		if (rows == 0) {
+			statement.execute("DROP TABLE alerts");
+			return;
+		}
+		statement.execute("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS kind VARCHAR(20) NOT NULL DEFAULT 'FILL'");
+		statement.execute("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS acknowledged BOOLEAN NOT NULL DEFAULT FALSE");
+		statement.execute("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS resolved BOOLEAN NOT NULL DEFAULT FALSE");
+		statement.execute("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP");
+	}
+}
+
 
 private static Set<Integer> readIds(Statement statement, String sql) throws SQLException {
 	Set<Integer> ids = new HashSet<>();
