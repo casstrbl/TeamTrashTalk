@@ -81,7 +81,7 @@ export default function ToolsPage({ bins, allBins, fillOn, fillAt, offlineOn, us
         </p>
       )}
 
-      {!staff ? (
+      {!staff && !(usingSampleData && tab === 'test') ? (
         <ServerSignIn
           notice={expired ? 'Your server sign-in ran out, so please sign in again.' : ''}
           onSignedIn={s => { setExpired(false); setStaff(s) }}
