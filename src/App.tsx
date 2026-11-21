@@ -14,6 +14,9 @@ import { mockBins } from './data/mockBins'
 import { campusBoundary } from './data/campusBoundary'
 import HistoryPage from './HistoryPage'
 import ToolsPage from './ToolsPage'
+
+import { simulateBrowserAction } from './browserSimulation'
+
 import { BaseMap, CAMPUS, CampusFog, MAP_LIMIT, mercatorY } from './campusMap'
 
 // fill bands: green 0-49, yellow 50-79, red 80-100
@@ -1346,6 +1349,40 @@ export default function App() {
   const [apiBins, setApiBins] = useState<Tribin[]>(TRIBINS)
   // false while the site is showing mockBins because the server isn't answering
   const [apiLive, setApiLive] = useState(false)
+
+  
+  function runBrowserSimulation(
+    operations: {
+      action: 'fill' | 'empty' | 'offline' | 'reset'
+      input?: {
+        triBinID?: number
+        stream?: string
+        percent?: number
+      }
+    }[]
+  ) {
+    if (apiLive) {
+      throw new Error('Browser simulation is only available offline')
+    }
+
+    let nextBins: Tribin[] = apiBins
+    let lastResult: ReturnType<typeof simulateBrowserAction>['result'] | undefined
+
+    for (const { action, input } of operations) {
+      const update = simulateBrowserAction(nextBins, action, input)
+
+      nextBins = nextBins.map((bin, index) => ({
+        ...bin,
+        ...update.bins[index]
+      }))
+
+      lastResult = update.result
+    }
+
+    setApiBins(nextBins)
+    return lastResult ?? { message: 'No actions performed' }
+  }
+
   // lets the editor tools refresh the bins right after a change instead of waiting for the poll
   const refreshBinsRef = useRef<() => void>(() => {})
 
@@ -1918,6 +1955,9 @@ export default function App() {
               offlineOn={alertSettings.offlineOn}
               usingSampleData={!apiLive}
               onChanged={() => refreshBinsRef.current()}
+              
+              onBrowserSimulate={runBrowserSimulation}
+
               onScrollTop={scrollToTop}
             />
           )}
