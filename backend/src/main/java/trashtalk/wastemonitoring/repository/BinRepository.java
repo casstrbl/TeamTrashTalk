@@ -426,6 +426,86 @@ public class BinRepository {
             }
         }
     }
+    
+    
+    public void lockAndRefreshTriBin(Connection connection, TriBin triBin)
+            throws SQLException {
+
+        String lockParent = """
+            SELECT battery, lastUpdated
+            FROM triBins
+            WHERE triBinID = ?
+            FOR UPDATE
+            """;
+
+        try (PreparedStatement statement = connection.prepareStatement(lockParent)) {
+            statement.setInt(1, triBin.getTriBinID());
+
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) {
+                    throw new SQLException("TriBin not found: " + triBin.getTriBinID());
+                }
+
+                triBin.setBattery(rows.getInt("battery"));
+                Timestamp updated = rows.getTimestamp("lastUpdated");
+                triBin.setLastUpdated(updated == null ? null : updated.toLocalDateTime());
+            }
+        }
+
+        Map<Integer, Bin> binsById = new HashMap<>();
+        for (Bin bin : triBin.getBins()) {
+            binsById.put(bin.getBinID(), bin);
+        }
+
+        String readBins = """
+            SELECT binID, wasteHeight
+            FROM bins
+            WHERE triBinID = ?
+            """;
+
+        try (PreparedStatement statement = connection.prepareStatement(readBins)) {
+            statement.setInt(1, triBin.getTriBinID());
+
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    int binID = rows.getInt("binID");
+                    Bin bin = binsById.remove(binID);
+
+                    if (bin == null) {
+                        throw new SQLException("Missing compartment in TriBin: " + binID);
+                    }
+
+                    bin.setWasteHeight(rows.getDouble("wasteHeight"));
+                    binService.setStatus(bin);
+                }
+            }
+        }
+
+        if (!binsById.isEmpty()) {
+            throw new SQLException("TriBin contains compartments absent from the database.");
+        }
+    }
+    
+    
+    public void updateSensorContact(Connection connection, Bin bin, boolean malfunction) throws SQLException {
+    	
+    	String sql = """
+    			UPDATE bins
+    			SET last_sensor_contact = LOCALTIMESTAMP, sensorStatus = ?
+    			WHERE binID = ? AND triBinID = ?
+    			""";
+    	
+    	
+    	try (PreparedStatement statement = connection.prepareStatement(sql)) {
+    		statement.setString(1, malfunction ? "failed" : "online");
+    		statement.setInt(2, bin.getBinID());
+    		statement.setInt(3, bin.getTriBinID());
+    		
+    		if (statement.executeUpdate() != 1) {
+    			throw new SQLException("Could not update sensor contact for bin " + bin.getBinID());
+    		}
+    	}
+    }
 
 	// a blank zone comes back as the empty char
 	private static char toZone(String zone) {

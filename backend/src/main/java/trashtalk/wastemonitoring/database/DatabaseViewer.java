@@ -37,36 +37,34 @@ public class DatabaseViewer {
                     "TriBin ID: "
                     + resultSet.getInt("triBinID")
                 );
-
                 System.out.println(
-                    "Zone: "
-                    + resultSet.getString("zone")
-                );
+                        "Zone: "
+                        + resultSet.getString("zone")
+                    );
 
-                System.out.println(
-                    "Location: "
-                    + resultSet.getString("location")
-                );
+                    System.out.println(
+                        "Location: "
+                        + resultSet.getString("location")
+                    );
 
-                System.out.println(
-                    "Coordinates: "
-                    + resultSet.getDouble("binCoordinatesX")
-                    + ", "
-                    + resultSet.getDouble("binCoordinatesY")
-                );
+                    System.out.println(
+                        "Coordinates: "
+                        + resultSet.getDouble("binCoordinatesX")
+                        + ", "
+                        + resultSet.getDouble("binCoordinatesY")
+                    );
 
-                System.out.println();
+                    System.out.println();
+                }
+
+            } catch (SQLException e) {
+
+                throw new RuntimeException(
+                    "Error reading TriBin data.",
+                    e
+                );
             }
-
-        } catch (SQLException e) {
-
-            throw new RuntimeException(
-                "Error reading TriBin data.",
-                e
-            );
         }
-    }
-
     public static void viewBins() {
 
         String sql = """
@@ -108,7 +106,6 @@ public class DatabaseViewer {
                     + resultSet.getDouble("wasteHeight")
                     + " cm"
                 );
-
                 System.out.println();
             }
 
@@ -177,6 +174,47 @@ public class DatabaseViewer {
                 "Error reading Staff data.",
                 e
             );
+        }
+    }
+
+    public static void viewAlerts() {
+
+        String sql = """
+            SELECT *
+            FROM alerts
+            ORDER BY id DESC
+            """;
+
+        try (Connection connection = DatabaseConfig.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet resultSet = statement.executeQuery()) {
+
+            System.out.println("\n=== ALERTS ===");
+
+            if (!resultSet.next()) {
+                System.out.println("No alerts found.");
+                return;
+            }
+
+            do {
+                System.out.println("Alert ID: " + resultSet.getInt("id"));
+                System.out.println("Bin ID: " + resultSet.getInt("binID"));
+                System.out.println("TriBin ID: " + resultSet.getInt("triBinID"));
+                System.out.println("Zone: " + resultSet.getString("zone"));
+                System.out.println("Kind: " + resultSet.getString("kind"));
+                System.out.println("Severity: " + resultSet.getString("severity"));
+                System.out.println("Message: " + resultSet.getString("message"));
+                System.out.println("Time: " + resultSet.getTimestamp("time"));
+                System.out.println("Acknowledged: " + resultSet.getBoolean("acknowledged"));
+                System.out.println("Resolved: " + resultSet.getBoolean("resolved"));
+                if (resultSet.getTimestamp("resolved_at") != null) {
+                    System.out.println("Resolved At: " + resultSet.getTimestamp("resolved_at"));
+                }
+                System.out.println();
+            } while (resultSet.next());
+
+        } catch (SQLException e) {
+            throw new RuntimeException("Error reading alert data.", e);
         }
     }
 }

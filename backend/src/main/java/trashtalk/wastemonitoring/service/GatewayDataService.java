@@ -37,7 +37,6 @@ public class GatewayDataService {
 
     private SensorService sensorService;
     private HistoryService historyService;
-    private final BinService binService = new BinService();
     private final TriBinService triBinService = new TriBinService();
     private final AlertService alertService = new AlertService(triBinService, new AlertRepository());
     private final EmptyDetectionService emptyDetectionService = new EmptyDetectionService();
@@ -69,7 +68,8 @@ public class GatewayDataService {
     			sensor,
     			bin,
     			triBin,
-    			null);
+    			null,
+    			false);
     }
     
     
@@ -94,15 +94,7 @@ public class GatewayDataService {
         			"The request must identify the assigned bin.");
         }
         
-        double battery = request.getBatteryLevel();
-        
-        if (!Double.isFinite(battery)
-        		|| battery < 0
-        		|| battery > 100) {
-        	
-        	throw new IllegalArgumentException(
-        			"Battery percentage must be between 0 and 100.");
-        }
+        Double battery = request.getBatteryLevel();
         
         SensorReading reading = new SensorReading(
         		request.getSensorID(),
@@ -110,10 +102,17 @@ public class GatewayDataService {
         		request.getUnit(),
         		request.getTimestamp());
         
-        processReading(reading, sensor, bin, triBin, battery);
+        processReading(reading, sensor, bin, triBin, battery, false);
     }
     
     
+    /** Processes a simulated report and records which alerts it opens. */
+    void receiveFakeReading(Sensor sensor, Bin bin, TriBin triBin,
+            double value, String unit, Double battery) {
+        SensorReading reading = new SensorReading(sensor.getSensorID(), value, unit);
+        processReading(reading, sensor, bin, triBin, battery, true);
+    }
+
     /**
      * Shared private method to validate readings and preserve request ID, timestamp, and battery level.
      */
@@ -122,164 +121,116 @@ public class GatewayDataService {
             Sensor sensor,
             Bin bin,
             TriBin triBin,
-            Double battery) {
+            Double battery,
+            boolean simulated) {
+
+        if (battery != null && (!Double.isFinite(battery) || battery < 0 || battery > 100)) {
+            throw new IllegalArgumentException("Battery percentage must be between 0 and 100.");
+        }
 
         if (bin == null
                 || triBin == null
                 || triBin.getBins() == null
                 || bin.getTriBinID() != triBin.getTriBinID()
-                || triBin.getBins().stream().noneMatch(b -> b == bin)) {
-
-            throw new IllegalArgumentException(
-                    "The bin must belong to the given TriBin."
-            );
+                || triBin.getBins().stream().noneMatch(existingBin -> existingBin == bin)) {
+            throw new IllegalArgumentException("The bin must belong to the given TriBin.");
         }
 
         synchronized (triBin) {
-
-            if (!sensorService.isValidReading(reading, sensor, bin)) {
+            if (!sensorService.isFromAssignedSensor(reading, sensor, bin)) {
                 return;
             }
 
-            double previousWasteHeight = bin.getWasteHeight();
+            boolean malfunction = !sensorService.hasValidMeasurement(reading);
+
             int previousBattery = triBin.getBattery();
             LocalDateTime previousLastUpdated = triBin.getLastUpdated();
 
-            Map<Bin, Bin.BinStatus> previousStatuses =
-                    new IdentityHashMap<>();
-
+            Map<Bin, Double> previousHeights = new IdentityHashMap<>();
+            Map<Bin, Bin.BinStatus> previousStatuses = new IdentityHashMap<>();
+            
             for (Bin existingBin : triBin.getBins()) {
-                previousStatuses.put(
-                        existingBin,
-                        existingBin.getStatus()
-                );
+            	previousHeights.put(existingBin, existingBin.getWasteHeight());
+                previousStatuses.put(existingBin, existingBin.getStatus());
             }
 
             boolean committed = false;
+            boolean applied = false;
+            double heightBeforeReading = 0;
+            double heightAfterReading = 0;
 
             try (Connection connection = DatabaseConfig.getConnection()) {
-
                 connection.setAutoCommit(false);
 
                 try {
-                    // Lock before checking or updating this bin.
-                    LocalDateTime lastReadingTime =
-                            binRepository.lockLastReadingTime(
-                                    connection,
-                                    bin.getBinID(),
-                                    triBin.getTriBinID()
-                            );
+                	binRepository.lockAndRefreshTriBin(connection, triBin);
+                	LocalDateTime lastApplied = binRepository.lockLastReadingTime(
+                	        connection, bin.getBinID(), triBin.getTriBinID());
 
-                    // Preserve valid readings even when they arrive late.
-                    historyService.addReading(connection, reading, bin);
+                	binRepository.updateSensorContact(connection, bin, malfunction);
+                    AlertService reportAlerts = alertService;
+                    reportAlerts.checkSensorAlerts(connection, bin, triBin, battery, malfunction);
 
-                    boolean isNewer = lastReadingTime == null
-                            || reading.getTimestamp()
-                                    .isAfter(lastReadingTime);
-                    
-                    double heightBeforeReading = bin.getWasteHeight();
+                	if (!malfunction) {
+                	    // Preserve valid delayed readings in history.
+                	    historyService.addReading(connection, reading, bin);
 
-                    if (isNewer) {
+                	    LocalDateTime measuredAt = reading.getTimestamp();
+                	    if (lastApplied == null || measuredAt.isAfter(lastApplied)) {
+                	        boolean wasFull = triBinService.isFull(triBin);
+                	        heightBeforeReading = bin.getWasteHeight();
 
-                        for (Bin existingBin : triBin.getBins()) {
-                            binService.setStatus(existingBin);
-                        }
+                	        if (!sensorService.processReading(reading, sensor, bin)) {
+                	            throw new IllegalStateException("Validated reading was rejected.");
+                	        }
 
-                        boolean wasFull =
-                                triBinService.isFull(triBin);
-                        
-                        sensorService.processReading(
-                                reading,
-                                sensor,
-                                bin
-                        );
+                	        if (battery != null) {
+                	            triBin.setBattery((int) Math.round(battery));
+                	        }
+                	        if (triBin.getLastUpdated() == null
+                	                || measuredAt.isAfter(triBin.getLastUpdated())) {
+                	            triBin.setLastUpdated(measuredAt);
+                	        }
 
-                        // Only update station metadata when this reading is newer than the station's current timestamp.
-                        boolean isLatestStationReading =
-                                triBin.getLastUpdated() == null
-                                || reading.getTimestamp()
-                                        .isAfter(triBin.getLastUpdated());
+                	        binRepository.updateReadingState(connection, bin, triBin, measuredAt);
+                	        reportAlerts.checkNearFull(connection, bin, triBin);
+                	        reportAlerts.resolveIfNoLongerFull(connection, triBin);
+                	        reportAlerts.checkTriBin(connection, triBin, wasFull);
 
-                        if (isLatestStationReading) {
-
-                            if (battery != null) {
-                                triBin.setBattery(
-                                        (int) Math.round(battery)
-                                );
-                            }
-
-                            triBin.setLastUpdated(
-                                    reading.getTimestamp()
-                            );
-                        }
-
-                        binRepository.updateReadingState(
-                                connection,
-                                bin,
-                                triBin,
-                                reading.getTimestamp()
-                        );
-
-                        alertService.resolveIfNoLongerFull(
-                                connection,
-                                triBin
-                        );
-
-                        alertService.checkTriBin(
-                                connection,
-                                triBin,
-                                wasFull
-                        );
-                    }
-
-                    connection.commit();
+                	        heightAfterReading = bin.getWasteHeight();
+                	        applied = true;
+                	    }
+                	}
+                	
+                	connection.commit();
                     committed = true;
                     
-                    boolean emptied = emptyDetectionService.detectEmpty(
-                            bin.getBinID(),
-                            heightBeforeReading,
-                            bin.getWasteHeight()
-                    );
-
-                    if (emptied) {
-                        System.out.println(
-                                "Bin " + bin.getBinID() + " has been emptied."
-                        );
-                    }
-
-                } catch (SQLException | RuntimeException e) {
-
+                } catch (SQLException | RuntimeException error) {
                     try {
+                    	
                         connection.rollback();
+                        
                     } catch (SQLException rollbackError) {
-                        e.addSuppressed(rollbackError);
+                    	
+                        error.addSuppressed(rollbackError);
+                        
                     }
-
-                    throw e;
+                    throw error;
                 }
-
-            } catch (SQLException e) {
-
-                throw new IllegalStateException(
-                        "Could not save sensor reading.",
-                        e
-                );
-
+            } catch (SQLException error) {
+                throw new IllegalStateException("Could not save sensor report.", error);
             } finally {
-
                 if (!committed) {
-
-                    bin.setWasteHeight(previousWasteHeight);
                     triBin.setBattery(previousBattery);
                     triBin.setLastUpdated(previousLastUpdated);
-
-                    for (Map.Entry<Bin, Bin.BinStatus> entry
-                            : previousStatuses.entrySet()) {
-
-                        entry.getKey().setStatus(entry.getValue());
-                    }
+                    previousHeights.forEach(Bin::setWasteHeight);
+                    previousStatuses.forEach(Bin::setStatus);
                 }
             }
+
+            if (applied && emptyDetectionService.detectEmpty(bin.getBinID(), heightBeforeReading, heightAfterReading)) {
+                	System.out.println("Emptying detected for bin " + bin.getBinID() + " in tribin " + triBin.getTriBinID());
+                }
         }
     }
 }

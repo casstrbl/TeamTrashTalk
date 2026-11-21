@@ -26,37 +26,32 @@ public class SensorService {
      */
 
 	private final BinService binService = new BinService();
+	private final SensorFailureService failureChecks = new SensorFailureService();
+
 	
 	/**
-	 * Validates a reading without changing the bin.
+	 * Checks that a reading has a valid measurement.
 	 */
-	public boolean isValidReading(
-	        SensorReading reading,
-	        Sensor sensor,
-	        Bin bin) {
-
-	    if (reading == null
-	            || sensor == null
-	            || bin == null
-	            || reading.getTimestamp() == null) {
-
-	        return false;
-	    }
-
-	    if (reading.getSensorID() != sensor.getSensorID()
-	            || sensor.getBinID() != bin.getBinID()
-	            || !sensor.isActive()) {
-
-	        return false;
-	    }
-
-	    double height = reading.getValue();
-
-	    return Double.isFinite(height)
-	            && height >= 0
-	            && height <= Bin.BIN_HEIGHT;
+	public boolean hasValidMeasurement(SensorReading reading) {
+		return reading != null
+				&& "cm".equalsIgnoreCase(reading.getUnit())
+				&& !failureChecks.hasImpossibleValue(reading, Bin.BIN_HEIGHT);
 	}
 
+	   
+	/**
+	 * Checks whether the report came from the active sensor assigned to the bin.
+	 */
+	public boolean isFromAssignedSensor(SensorReading reading, Sensor sensor, Bin bin) {
+	    return reading != null
+	            && sensor != null
+	            && bin != null
+	            && sensor.isActive()
+	            && reading.getSensorID() == sensor.getSensorID()
+	            && sensor.getBinID() == bin.getBinID();
+	}
+	
+	
 	/**
 	 * Applies a valid reading to the bin.
 	 * Timestamp ordering is managed by GatewayDataService.
@@ -66,10 +61,11 @@ public class SensorService {
 	        Sensor sensor,
 	        Bin bin) {
 
-	    if (!isValidReading(reading, sensor, bin)) {
+	    if (!isFromAssignedSensor(reading, sensor, bin) || !hasValidMeasurement(reading)) {
 	        return false;
 	    }
 
+	    
 	    bin.setWasteHeight(reading.getValue());
 	    binService.setStatus(bin);
 
