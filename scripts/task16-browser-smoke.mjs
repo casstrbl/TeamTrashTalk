@@ -7,7 +7,7 @@ try {
   await page.goto('http://127.0.0.1:4173/TeamTrashTalk/', { waitUntil: 'domcontentloaded' })
   await page.getByRole('button', { name: /^Log in/ }).first().click()
   await page.getByLabel('Email').fill('person1@example.com')
-  await page.getByLabel('Password').fill('demo')
+  await page.locator('input[type="password"]').fill('demo')
   await page.locator('button[type=submit]').click()
   await page.getByRole('button', { name: 'Editor tools' }).click()
   await page.getByRole('heading', { name: 'Test Panel' }).waitFor()
