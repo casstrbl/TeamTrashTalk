@@ -220,6 +220,8 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
       if (ok > 0) addLog(`${done.replace('{n}', String(ok))}${failed ? ` (${failed} didn’t work: ${firstError})` : ''}`, failed === 0)
       else addLog(firstError || 'Something went wrong.', false)
       onChanged()
+    } catch (err) {
+      addLog(err instanceof Error ? err.message : 'Could not simulate the bins.', false)
     } finally {
       setBusy(null)
     }
