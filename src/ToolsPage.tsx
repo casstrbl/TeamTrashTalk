@@ -10,7 +10,8 @@ import ManageBinsPage from './ManageBinsPage'
 
 type Tab = 'test' | 'bins'
 
-export default function ToolsPage({ bins, allBins, fillOn, fillAt, offlineOn, usingSampleData, onChanged, onScrollTop }: {
+
+export default function ToolsPage({ bins, allBins, fillOn, fillAt, offlineOn, usingSampleData, onChanged, onBrowserSimulate, onScrollTop }: {
   bins: ToolBin[] // bins this editor can see on the dashboard
   allBins: ToolBin[] // every bin from the server, including ones with no zone yet
   fillOn: boolean
@@ -18,6 +19,16 @@ export default function ToolsPage({ bins, allBins, fillOn, fillAt, offlineOn, us
   offlineOn: boolean
   usingSampleData: boolean // the server isn’t answering (the last poll failed)
   onChanged: () => void
+  
+  onBrowserSimulate: (operations: {
+    action: 'fill' | 'empty' | 'offline' | 'reset'
+    input?: {
+      triBinID?: number
+      stream?: string
+      percent?: number
+    }
+  }[]) => { message: string }
+
   onScrollTop: () => void
 }) {
   const [tab, setTab] = useState<Tab>('test')
@@ -77,18 +88,32 @@ export default function ToolsPage({ bins, allBins, fillOn, fillAt, offlineOn, us
 
       {usingSampleData && (
         <p className="rounded-2xl bg-warn-soft text-status-warn-ink text-sm font-bold px-4 py-3">
-          The server isn’t answering right now, so these buttons won’t work. Start the backend (or check the test link) and this message goes away by itself.
-        </p>
+         
+The Java server is offline. Test Panel actions will use simulated browser data without changing the server.
+
+</p>
+
       )}
 
-      {!staff ? (
+      {!staff && !(usingSampleData && tab === 'test') ? (
         <ServerSignIn
           notice={expired ? 'Your server sign-in ran out, so please sign in again.' : ''}
           onSignedIn={s => { setExpired(false); setStaff(s) }}
         />
       ) : tab === 'test' ? (
-        <TestPanelPage bins={bins} fillOn={fillOn} fillAt={fillAt} offlineOn={offlineOn} onChanged={onChanged} />
-      ) : (
+        
+<TestPanelPage
+  bins={bins}
+  fillOn={fillOn}
+  fillAt={fillAt}
+  offlineOn={offlineOn}
+  onChanged={onChanged}
+  usingSampleData={usingSampleData}
+  onBrowserSimulate={onBrowserSimulate}
+/>
+
+) : (
+
         <ManageBinsPage bins={allBins} onChanged={onChanged} onScrollTop={onScrollTop} />
       )}
     </div>
