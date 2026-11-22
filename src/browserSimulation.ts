@@ -1,5 +1,6 @@
 
 import type { ToolBin } from './TestPanelPage'
+import { mockBins } from './data/mockBins'
 
 type BrowserAction = 'fill' | 'empty' | 'offline' | 'reset'
 
@@ -14,19 +15,24 @@ export function simulateBrowserAction(
   action: BrowserAction,
   input: SimulationInput = {}
 ) {
+  // Restore the original demo values without changing the server.
   if (action === 'reset') {
+    const defaults = new Map(mockBins.map(bin => [bin.id, bin]))
     return {
-      bins: bins.map(bin => ({
-        ...bin,
-        compartments: bin.compartments.map(c => ({
-          ...c,
-          fill: 2
-        })),
-        sensorStatus: 'online' as const,
-        lastUpdated: 'just now'
-      })),
+      bins: bins.map(bin => {
+        const initial = defaults.get(bin.id)
+        return {
+          ...bin,
+          compartments: bin.compartments.map(c => ({
+            ...c,
+            fill: initial?.compartments.find(base => base.label === c.label)?.fill ?? 2
+          })),
+          sensorStatus: (initial?.sensorStatus ?? 'online') as 'online' | 'offline',
+          lastUpdated: initial?.lastUpdated ?? 'just now'
+        }
+      }),
       result: {
-        message: 'Browser demo bins reset',
+        message: 'Browser demo bins restored to starting levels',
         binsReset: bins.length
       }
     }
@@ -64,6 +70,7 @@ export function simulateBrowserAction(
         ? { ...c, fill: percent }
         : c
     )
+    updated.sensorStatus = 'online'
   }
 
   if (action === 'empty') {
@@ -71,6 +78,7 @@ export function simulateBrowserAction(
       ...c,
       fill: 2
     }))
+    updated.sensorStatus = 'online'
   }
 
   if (action === 'offline') {
