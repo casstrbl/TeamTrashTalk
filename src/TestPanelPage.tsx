@@ -205,8 +205,9 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
     try {
       if (usingSampleData) {
         if (path === 'fill' || path === 'empty' || path === 'offline') {
+          const browserAction = path as 'fill' | 'empty' | 'offline'
           const operations = list.map(b => ({
-            action: path,
+            action: browserAction,
             input: bodyFor(b) as { triBinID?: number; stream?: string; percent?: number }
           }))
           onBrowserSimulate(operations)
