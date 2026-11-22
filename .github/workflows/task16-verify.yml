@@ -10,7 +10,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -26,3 +26,15 @@ jobs:
         run: pnpm exec tsc --noEmit
       - name: Production build (no deploy)
         run: pnpm build
+      - name: Install browser smoke-test tooling
+        run: |
+          pnpm add -D playwright
+          pnpm exec playwright install chromium --with-deps
+      - name: Browser smoke test against local preview (no deployment)
+        run: |
+          pnpm exec vite preview --host 127.0.0.1 --port 4173 > /tmp/task16-vite.log 2>&1 &
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:4173/TeamTrashTalk/ >/dev/null; then break; fi
+            sleep 1
+          done
+          node scripts/task16-browser-smoke.mjs
