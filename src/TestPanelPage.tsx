@@ -3,8 +3,8 @@ import type { ReactNode } from 'react'
 import { apiRequest, triBinNumber } from './api'
 
 // editor-only page where the client presses buttons instead of waiting on real sensors.
-// every button calls /api/simulate/..., which saves readings the same way a real sensor would,
-// so the rest of the app (cards, alerts, pickup list, history) reacts for real
+// supported actions use browser-only mock data when the Java server is unavailable.
+// with the server online, API actions save real readings and history.
 
 type Stream = 'Landfill' | 'Recycling' | 'Compost'
 
@@ -101,12 +101,17 @@ function ActionTile({ step, title, text, children }: { step: string; title: stri
 
 const BUTTON = 'w-full min-h-12 rounded-full bg-pine text-ivory text-[15px] font-bold hover:bg-forest-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
 
-export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChanged }: {
+export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChanged, usingSampleData, onBrowserSimulate }: {
   bins: ToolBin[]
   fillOn: boolean // the signed-in user's own alert settings, so messages match what they'll see
   fillAt: number
   offlineOn: boolean
-  onChanged: () => void // refresh the bins right away instead of waiting for the next poll
+  onChanged: () => void
+  usingSampleData: boolean
+  onBrowserSimulate: (operations: {
+    action: 'fill' | 'empty' | 'offline' | 'reset'
+    input?: { triBinID?: number; stream?: string; percent?: number }
+  }[]) => { message: string }
 }) {
   const sorted = useMemo(() => [...bins].sort((a, b) => triBinNumber(a.id) - triBinNumber(b.id)), [bins])
   // start on a bin that's reporting, so the first button press shows a change right away
@@ -122,6 +127,7 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
 
   // is the live simulation running? checked on open, then every 15 seconds (it can stop by itself)
   useEffect(() => {
+    if (usingSampleData) { setTimer(null); return }
     let active = true
     async function load() {
       try {
@@ -134,7 +140,7 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
     void load()
     const id = window.setInterval(() => { void load() }, 15000)
     return () => { active = false; window.clearInterval(id) }
-  }, [])
+  }, [usingSampleData])
 
   // the last bin "random bin" landed on, so its levels show at the top
   const [lastRandomId, setLastRandomId] = useState<string | null>(null)
@@ -171,6 +177,18 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
   async function run(action: Action, path: string, body: object, describe: (res: SimResult) => string) {
     setBusy(action)
     try {
+      if (usingSampleData) {
+        if (path === 'fill' || path === 'empty' || path === 'offline' || path === 'reset') {
+          const result = onBrowserSimulate([{
+            action: path,
+            input: body as { triBinID?: number; stream?: string; percent?: number }
+          }])
+          addLog(`${result.message} (browser demo only)`, true)
+        } else {
+          addLog(`${action} requires the backend.`, false)
+        }
+        return
+      }
       const res = await apiRequest<SimResult>(`/api/simulate/${path}`, 'POST', body)
       addLog(describe(res), true)
       onChanged()
@@ -185,6 +203,19 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
   async function runAll(action: Action, list: ToolBin[], path: string, bodyFor: (b: ToolBin) => object, done: string) {
     setBusy(action)
     try {
+      if (usingSampleData) {
+        if (path === 'fill' || path === 'empty' || path === 'offline') {
+          const operations = list.map(b => ({
+            action: path,
+            input: bodyFor(b) as { triBinID?: number; stream?: string; percent?: number }
+          }))
+          onBrowserSimulate(operations)
+          addLog(`${done.replace('{n}', String(list.length))} (browser demo only)`, true)
+        } else {
+          addLog(`${action} requires the backend.`, false)
+        }
+        return
+      }
       const { ok, failed, firstError } = await forEachBin(list, b => apiRequest<SimResult>(`/api/simulate/${path}`, 'POST', bodyFor(b)))
       if (ok > 0) addLog(`${done.replace('{n}', String(ok))}${failed ? ` (${failed} didn’t work: ${firstError})` : ''}`, failed === 0)
       else addLog(firstError || 'Something went wrong.', false)
@@ -238,6 +269,10 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
   }
 
   function demoWeek() {
+    if (usingSampleData) {
+      addLog('Saved history requires the Java backend.', false)
+      return
+    }
     const list = targets()
     if (list.length === 0) return
     if (list.length > 1) {
@@ -255,6 +290,7 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
   }
 
   async function toggleTimer() {
+    if (usingSampleData) { addLog('Live timer requires the Java backend.', false); return }
     const starting = !timer?.running
     setBusy('timer')
     try {
@@ -272,6 +308,11 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
   }
 
   async function systemCheck() {
+    if (usingSampleData) {
+      setChecks(null)
+      addLog('Server/database checks are unavailable in the browser-only demo.', false)
+      return
+    }
     setBusy('check')
     setChecks(null)
     try {
@@ -379,14 +420,14 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
           {offlineNow && <p className="text-xs font-semibold text-pine-muted mt-2 text-center">A new fill or empty reading brings it back online.</p>}
         </ActionTile>
 
-        <ActionTile step="4" title="Add demo history" text="Generate 7 days of hourly readings for the History chart and CSV export.">
-          <button onClick={demoWeek} disabled={busy !== null} className={BUTTON}>{busy === 'week' ? 'Adding…' : mode === 'all' ? 'Add 7 days to every bin' : 'Add 7 days of readings'}</button>
+        <ActionTile step="4" title="Add demo history" text={usingSampleData ? 'Requires the backend to save readings to History.' : 'Generate 7 days of hourly readings for the History chart and CSV export.'}>
+          <button onClick={demoWeek} disabled={busy !== null || usingSampleData} className={BUTTON}>{usingSampleData ? 'Backend required' : busy === 'week' ? 'Adding…' : mode === 'all' ? 'Add 7 days to every bin' : 'Add 7 days of readings'}</button>
         </ActionTile>
 
         <ActionTile
           step="5"
           title="Live sensor simulation"
-          text={`Every bin with a zone reports every ${timer?.intervalSeconds ?? 5} seconds at ${timer?.simSpeed ?? 60}× speed. Stops automatically after 30 minutes.`}
+          text={usingSampleData ? 'The live timer requires the backend. Browser fill and empty controls are available.' : `Every bin with a zone reports every ${timer?.intervalSeconds ?? 5} seconds at ${timer?.simSpeed ?? 60}× speed. Stops automatically after 30 minutes.`}
         >
           {timer?.running && (
             <p className="flex items-center justify-center gap-2 text-sm font-bold text-olive-ink mb-3">
@@ -394,8 +435,8 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
               Running{timer.stopsAt ? ` · stops at ${new Date(timer.stopsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}
             </p>
           )}
-          <button onClick={toggleTimer} disabled={busy !== null} className={BUTTON}>
-            {busy === 'timer' ? 'Working…' : timer?.running ? 'Stop simulation' : 'Start simulation'}
+          <button onClick={toggleTimer} disabled={busy !== null || usingSampleData} className={BUTTON}>
+            {usingSampleData ? 'Backend required' : busy === 'timer' ? 'Working…' : timer?.running ? 'Stop simulation' : 'Start simulation'}
           </button>
         </ActionTile>
 
@@ -407,7 +448,7 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
           </button>
         </ActionTile>
 
-        <ActionTile step="7" title="System check" text="Verify the database, login, alerts, CSV export and sensor failure detection.">
+        <ActionTile step="7" title="System check" text={usingSampleData ? 'Cannot verify backend/database checks in browser-only mode.' : 'Verify the database, login, alerts, CSV export and sensor failure detection.'}>
           {checks && (
             <ul className="space-y-1.5 mb-3">
               {Object.entries(checks).map(([key, ok]) => (
@@ -418,7 +459,7 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
               ))}
             </ul>
           )}
-          <button onClick={systemCheck} disabled={busy !== null} className={BUTTON}>{busy === 'check' ? 'Checking…' : 'Run system check'}</button>
+          <button onClick={systemCheck} disabled={busy !== null || usingSampleData} className={BUTTON}>{usingSampleData ? 'Backend required' : busy === 'check' ? 'Checking…' : 'Run system check'}</button>
         </ActionTile>
       </div>
 
@@ -431,7 +472,7 @@ export default function TestPanelPage({ bins, fillOn, fillAt, offlineOn, onChang
           )}
         </div>
         {log.length === 0 ? (
-          <p className="text-sm text-pine-muted py-2">Results appear here. The Summary, Details, Pickup List and History pages update at the same time.</p>
+          <p className="text-sm text-pine-muted py-2">Results appear here. Browser-demo actions update bin displays locally, but do not create saved server history.</p>
         ) : (
           <ul aria-live="polite">
             {log.map(entry => (
