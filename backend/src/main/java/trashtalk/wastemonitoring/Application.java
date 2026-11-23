@@ -19,6 +19,11 @@ import main.java.trashtalk.wastemonitoring.controller.SimulateController;
 import main.java.trashtalk.wastemonitoring.controller.DetectedPickupController;
 import main.java.trashtalk.wastemonitoring.controller.ZoneController;
 import main.java.trashtalk.wastemonitoring.database.DemoAccountSeeder;
+import main.java.trashtalk.wastemonitoring.controller.SensorReadingController;
+import main.java.trashtalk.wastemonitoring.service.GatewayDataService;
+import main.java.trashtalk.wastemonitoring.repository.BinRepository;
+
+import java.util.Map;
 
 public class Application {
 
@@ -28,6 +33,7 @@ public class Application {
 		DemoAccountSeeder.seedFromEnvironment();
 		DatabaseViewer.viewTriBins();
 		DatabaseViewer.viewBins();
+		DatabaseViewer.viewAlerts();
 
 		HistoryService historyService = new HistoryService();
 		HistoryCsvService historyCsvService = new HistoryCsvService();
@@ -100,7 +106,22 @@ public class Application {
 					"/api/simulate/",
 					new SimulateController(loginService)
 			);
+			
+			// Register the LoRaWAN webhook handler at /api/sensor-readings if a webhook token has been set.
+			String webhookToken = System.getenv("SENSOR_WEBHOOK_TOKEN");
 
+			if (webhookToken != null && !webhookToken.isBlank()) {
+			    server.createContext(
+			            SensorReadingController.PATH,
+			            new SensorReadingController(
+			                    new GatewayDataService(historyService),
+			                    new BinRepository(),
+			                    Map.of("YOUR_DEVICE_ID",
+			                            new SensorReadingController.SensorAssignment(
+			                                    1, 2, 201, 74.5)),
+			                    webhookToken));
+			}
+			
 			// Start the server
 			server.start();
 
@@ -110,7 +131,8 @@ public class Application {
             if (fakeSensorScheduler != null) {
                 Runtime.getRuntime().addShutdownHook(new Thread(fakeSensorScheduler::close));
             }
-            // lets the test panel see and stop it
+            
+         // lets the test panel see and stop it
             main.java.trashtalk.wastemonitoring.service.SensorTimer.adopt(fakeSensorScheduler);
 
 			System.out.println("Health: http://localhost:" + serverPort + "/api/health");

@@ -287,7 +287,7 @@ public class SystemCheckController implements HttpHandler {
             try (Connection connection = DatabaseConfig.getConnection()) {
                 connection.setAutoCommit(false);
                 try {
-                    Alert alert = new Alert(1, 1, 'A', Alert.Severity.CRITICAL, "system check", Alert.Kind.FILL);
+                    Alert alert = new Alert(1, 1, 'A', Alert.Severity.CRITICAL, "system check", Alert.Kind.FULL);
                     new AlertRepository().save(connection, alert);
                 } finally {
                     connection.rollback();
