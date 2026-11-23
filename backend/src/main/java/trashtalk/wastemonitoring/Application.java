@@ -107,16 +107,21 @@ public class Application {
 					new SimulateController(loginService)
 			);
 			
-			// Register the LoRaWAN webhook handler at /api/sensor-readings.
-			server.createContext(
-			        SensorReadingController.PATH,
-			        new SensorReadingController(
-			                new GatewayDataService(historyService),
-			                new BinRepository(),
-			                Map.of("YOUR_DEVICE_ID",
-			                        new SensorReadingController.SensorAssignment(
-			                                1, 2, 201, 74.5)),
-			                System.getenv("SENSOR_WEBHOOK_TOKEN")));
+			// Register the LoRaWAN webhook handler at /api/sensor-readings if a webhook token has been set.
+			String webhookToken = System.getenv("SENSOR_WEBHOOK_TOKEN");
+
+			if (webhookToken != null && !webhookToken.isBlank()) {
+			    server.createContext(
+			            SensorReadingController.PATH,
+			            new SensorReadingController(
+			                    new GatewayDataService(historyService),
+			                    new BinRepository(),
+			                    Map.of("YOUR_DEVICE_ID",
+			                            new SensorReadingController.SensorAssignment(
+			                                    1, 2, 201, 74.5)),
+			                    webhookToken));
+			}
+			
 			// Start the server
 			server.start();
 
